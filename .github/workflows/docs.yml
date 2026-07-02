@@ -61,8 +61,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          # The default 10-minute poll window can be too short for a repo's
-          # very first Pages deployment while GitHub provisions the site;
-          # later deploys are typically much faster than even the default.
-          timeout: 1200000
