@@ -161,10 +161,10 @@ else()
   FetchContent_MakeAvailable(googletest)
 endif()
 
-# Build-commit fingerprint (docs/architecture.md §19). Captured once here at
-# configure time, rather than as a target-wide compile definition, so that
-# only src/core/EngineFingerprint.cpp recompiles when HEAD moves — the rest of
-# the engine's translation units stay untouched.
+# Build-commit stamp for the engine's build-info string (docs/architecture.md
+# §19). Captured once here at configure time, rather than as a target-wide
+# compile definition, so that only src/core/EngineId.cpp recompiles when HEAD
+# moves — the rest of the engine's translation units stay untouched.
 find_package(Git QUIET)
 set(LATTICE_BUILD_COMMIT "unknown")
 if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
@@ -201,7 +201,7 @@ file(GLOB_RECURSE ENGINE_SOURCES
 
 add_library(voxel-engine ${ENGINE_SOURCES})
 
-set_source_files_properties(src/core/EngineFingerprint.cpp PROPERTIES
+set_source_files_properties(src/core/EngineId.cpp PROPERTIES
   COMPILE_DEFINITIONS "LATTICE_BUILD_COMMIT=\"${LATTICE_BUILD_COMMIT}\"")
 
 # include/ is the public API and propagates to consumers; src/ holds engine

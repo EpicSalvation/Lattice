@@ -1,5 +1,5 @@
 #include "core/Engine.h"
-#include "core/EngineFingerprint.h"
+#include "core/EngineId.h"
 #include "Logger.h"
 #include "PluginManager.h"
 #include "audio/AudioManager.h"
@@ -33,9 +33,9 @@ Engine::~Engine()
 void Engine::init(PluginManager& pm, World& world)
 {
     // Debug-level only (never shown at the default Info level a shipped game
-    // runs at), but referencing it here keeps EngineFingerprint.cpp linked
-    // into every binary built against this engine (architecture.md §19).
-    Log::debug("Engine", core::engineFingerprint());
+    // runs at), but referencing it here keeps EngineId.cpp linked into every
+    // binary built against this engine (architecture.md §19).
+    Log::debug("Engine", core::engineId());
 
     pm_    = &pm;
     world_ = &world;

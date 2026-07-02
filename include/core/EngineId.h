@@ -1,18 +1,15 @@
 #pragma once
 
-// Build-provenance marker (docs/architecture.md §19).
+// Build identification string (docs/architecture.md §19).
 //
-// Every binary that links this engine embeds the string returned by
-// engineFingerprint() in its data segment, independent of whatever attribution
-// (or lack thereof) the shipped game displays or whether engine logging is
-// enabled at runtime. It exists so the copyright holder can positively
-// identify, via a binary inspection tool (`strings`, a hex dump, etc.), that a
-// given executable was built against this engine — evidence for enforcing the
-// MIT license's attribution requirement, not a technical restriction on use.
-// It does not alter engine behavior and cannot be used to disable or gate
-// functionality.
+// Every binary that links this engine carries the string returned by
+// engineId() in its data segment — ordinary build metadata (engine name,
+// upstream repo, license, build commit), the same kind of "about" string many
+// libraries embed. It's a byproduct of the normal build/version stamping
+// engines do, but it's also useful if a copyright holder ever needs to
+// confirm a given executable was built against this engine.
 namespace core {
 
-const char* engineFingerprint();
+const char* engineId();
 
 }  // namespace core
