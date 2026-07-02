@@ -749,6 +749,10 @@ on what you want to do:
 - **Read working code** — the `demos/` series (each a standalone target, listed in
   [Setup](#setup)) demonstrates every major feature, and the `plugins/` directory
   holds the reference plugins those demos load.
+- **Browse the API reference** — the generated
+  [Lattice API Reference](https://epicsalvation.github.io/Lattice/api/) covers
+  the full public surface: `include/`'s engine and renderer headers, plus each
+  reference plugin's extension API.
 
 For materials and composition recipes specifically, see
 [`docs/creating-voxels.md`](docs/creating-voxels.md); for the YAML / tuning
@@ -1457,7 +1461,7 @@ Development is organized into two phases. Phase 1 targets a minimum viable engin
 - [x] Make sure the engine has a name.
 - [ ] **Demo — Voxel World (Minecraft-style infinite survival):** Another large demo in the spirit of the Mega-Demo, deliberately emulating a classic Minecraft-like world — no mobs/AI this time (that's the Mega-Demo's job). Roughly **six biomes** (one of them ocean) generated deterministically from a user-supplied world seed, with a sane default seed when none is given (the Mega-Demo's seed pattern). Unlike a vanilla Minecraft world, this one is **not bounded** by default: with no size arguments it streams infinitely in all four cardinal (horizontal) directions exactly like the engine's other decomposed worlds, generating forever as the player explores. Optional runtime arguments can instead cap the world to a finite size, so a bounded "classic world border" can be demonstrated too. The player can **fly** at a normal exploration speed and at a much faster traversal speed, so a session can cover the distance of a typical (bounded) Minecraft world in a reasonable amount of time and then keep going to show the world has no edge.
 - [ ] **Demo — "No Man's Voxel" (multi-world flight):** A follow-on riffing on No Man's Sky, built on the Voxel World demo above. The player starts on a "paradise world" — essentially the previous demo's world — but can fly up and out past its local bounds to reach and land on other nearby worlds in the same session, no loading-screen jump. Each additional world is simpler than the paradise world (one or two biomes apiece). Depends on the skybox evaluation added to M17.
-- [ ] **API reference documentation:** The tutorials teach the engine by walking through demos, but there is no standalone reference for the plugin API surface (`plugin_api.h` types/functions, hook signatures, `World`/`WorldCoord` interfaces, subsystem `api()` entry points). Generate or hand-write a proper API reference (e.g. Doxygen over the public headers, or a structured Markdown reference under `docs/`) so engine consumers can look up a symbol's contract without reverse-engineering it from a tutorial or demo.
+- [x] **API reference documentation:** The tutorials teach the engine by walking through demos, but there is no standalone reference for the plugin API surface (`plugin_api.h` types/functions, hook signatures, `World`/`WorldCoord` interfaces, subsystem `api()` entry points). Generate or hand-write a proper API reference (e.g. Doxygen over the public headers, or a structured Markdown reference under `docs/`) so engine consumers can look up a symbol's contract without reverse-engineering it from a tutorial or demo. — *shipped: Doxygen over `include/` plus each reference plugin's extension-API header (doxygen-awesome-css theme), deployed via GitHub Actions to GitHub Pages at [epicsalvation.github.io/Lattice](https://epicsalvation.github.io/Lattice/), alongside a small landing page linking the API reference, tutorials, demos, and plugins.*
 - [ ] 1.0 tag
 
 **Post-1.0 — Deferred Features**
@@ -1496,6 +1500,8 @@ Items below were evaluated during the M17 pre-release sanity check (`docs/m17-re
 ---
 
 ## Further Reading
+
+The [Lattice API Reference](https://epicsalvation.github.io/Lattice/api/) is a generated, browsable API reference (Doxygen) for the public headers under `include/` and each reference plugin's extension API — use it to look up a type or function's contract once you already know what you're building.
 
 [`docs/architecture.md`](docs/architecture.md) is the primary reference for anyone — human or AI — doing non-trivial work on the engine. It covers:
 

@@ -3,9 +3,12 @@
 # This is a hand-trimmed config, not the full ~2700-line generated default —
 # only settings that diverge from Doxygen's defaults are listed below. Run
 # `docs/fetch-doxygen-theme.sh` once first (fetches doxygen-awesome-css into
-# docs/doxygen-awesome/, git-ignored), then from the repo root:
+# docs/doxygen-awesome/, git-ignored). Doxygen resolves this file's relative
+# paths (INPUT, OUTPUT_DIRECTORY, HTML_HEADER, ...) against the CURRENT
+# WORKING DIRECTORY, not the Doxyfile's location, so run it from *inside*
+# docs/, not from the repo root:
 #
-#     doxygen docs/Doxyfile
+#     cd docs && doxygen Doxyfile
 #
 # Output lands in docs/_build/html/index.html (also git-ignored).
 
