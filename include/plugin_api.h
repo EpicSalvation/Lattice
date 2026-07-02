@@ -1,10 +1,13 @@
 #pragma once
 
-// Public plugin interface for the Voxel Game Engine.
-//
-// Plugins register flat callbacks for named engine hooks rather than subclassing
-// engine types. The full set of extension points is visible here without tracing
-// any class hierarchy. See docs/ARCHITECTURE.md §8 for design rationale.
+/**
+ * @file plugin_api.h
+ * @brief Public plugin interface for the Voxel Game Engine.
+ *
+ * Plugins register flat callbacks for named engine hooks rather than subclassing
+ * engine types. The full set of extension points is visible here without tracing
+ * any class hierarchy. See docs/ARCHITECTURE.md §8 for design rationale.
+ */
 
 #include "WorldCoord.h"
 #include <cstddef>
@@ -13,46 +16,65 @@
 
 // ---------------------------------------------------------------------------
 // Material properties — carried by every voxel.
-//
-// Simulation systems query these values and respond to them; they never check
-// a block type ID. A new material (stone, ice, volcanic rock) is defined by
-// filling this struct — no changes to PhysicsSystem, fluid system, or
-// voxel-removal system are required.
 // ---------------------------------------------------------------------------
+
+/**
+ * @brief Per-material physical properties carried by every voxel.
+ *
+ * Simulation systems query these values and respond to them; they never check
+ * a block type ID. A new material (stone, ice, volcanic rock) is defined by
+ * filling this struct — no changes to PhysicsSystem, fluid system, or
+ * voxel-removal system are required.
+ */
 struct MaterialProperties {
-    float   density              = 0.0f;  // kg/m³; drives physics mass and load
-    float   structural_strength  = 0.0f;  // collapse resistance; queried by PropagationSystem
-    float   thermal_conductivity = 0.0f;  // W/(m·K); drives heat and fire spread
-    float   porosity             = 0.0f;  // 0.0–1.0; fraction permeable to fluid
-    float   hardness             = 0.0f;  // relative resistance to removal/destruction
-    float   light_emission       = 0.0f;  // [0,1] emitted block light; drives LightingSystem (M17 §17)
-    uint8_t palette_index        = 0;     // index into the 256-entry visual palette (.vox compat)
-    uint8_t _pad[3]              = {};    // explicit padding — keeps memcmp-based determinism checks
-                                          // valid across GCC optimization levels. Must stay zero;
-                                          // never read by engine code.
+    float   density              = 0.0f;  ///< kg/m³; drives physics mass and load
+    float   structural_strength  = 0.0f;  ///< collapse resistance; queried by PropagationSystem
+    float   thermal_conductivity = 0.0f;  ///< W/(m·K); drives heat and fire spread
+    float   porosity             = 0.0f;  ///< 0.0–1.0; fraction permeable to fluid
+    float   hardness             = 0.0f;  ///< relative resistance to removal/destruction
+    float   light_emission       = 0.0f;  ///< [0,1] emitted block light; drives LightingSystem (M17 §17)
+    uint8_t palette_index        = 0;     ///< index into the 256-entry visual palette (.vox compat)
+    /**< explicit padding — keeps memcmp-based determinism checks
+     *   valid across GCC optimization levels. Must stay zero;
+     *   never read by engine code. */
+    uint8_t _pad[3]              = {};
 };
 
-// Forward declaration — full definition in src/world/Voxel.h
+/// Forward declaration — full definition in src/world/Voxel.h
 struct Voxel;
 
 // ---------------------------------------------------------------------------
 // Recipe parameters and deterministic RNG (M9, docs/ARCHITECTURE.md §6)
-//
-// Recipe, feature-generator, and noise parameters cross the plugin ABI as a flat
-// array of tagged key-value pairs — no std:: container crosses the boundary. A
-// value is numeric ("no ore above depth 32") or a string ("bias toward granite"
-// -> a material id by name). seed_parameters use the same type.
 // ---------------------------------------------------------------------------
+
+/**
+ * @brief Kind discriminator for a RecipeParam value.
+ *
+ * Recipe, feature-generator, and noise parameters cross the plugin ABI as a flat
+ * array of tagged key-value pairs — no std:: container crosses the boundary. A
+ * value is numeric ("no ore above depth 32") or a string ("bias toward granite"
+ * -> a material id by name). seed_parameters use the same type.
+ */
 enum class RecipeParamKind : uint8_t { Number, String };
 
+/// @brief A single tagged key-value recipe/feature/noise parameter.
 struct RecipeParam {
     const char*     key    = nullptr;
     RecipeParamKind kind   = RecipeParamKind::Number;
-    double          number = 0.0;      // valid when kind == Number
-    const char*     text   = nullptr;  // valid when kind == String (e.g. a material id)
+    double          number = 0.0;      ///< valid when kind == Number
+    const char*     text   = nullptr;  ///< valid when kind == String (e.g. a material id)
 };
 
-// Header-only readers so a generator pulls a param without hand-rolling strcmp.
+/**
+ * @brief Look up a numeric recipe parameter by key.
+ *
+ * Header-only reader so a generator pulls a param without hand-rolling strcmp.
+ * @param params   array of tagged parameters to search
+ * @param count    number of entries in @p params
+ * @param key      parameter name to look up
+ * @param fallback value returned when @p key is absent or not numeric
+ * @return the matching parameter's numeric value, or @p fallback
+ */
 inline double recipe_param_num(const RecipeParam* params, size_t count,
                                const char* key, double fallback) {
     for (size_t i = 0; i < count; ++i)
@@ -60,6 +82,17 @@ inline double recipe_param_num(const RecipeParam* params, size_t count,
             return params[i].number;
     return fallback;
 }
+
+/**
+ * @brief Look up a string recipe parameter by key.
+ *
+ * Header-only reader so a generator pulls a param without hand-rolling strcmp.
+ * @param params   array of tagged parameters to search
+ * @param count    number of entries in @p params
+ * @param key      parameter name to look up
+ * @param fallback value returned when @p key is absent or not a string
+ * @return the matching parameter's string value, or @p fallback
+ */
 inline const char* recipe_param_str(const RecipeParam* params, size_t count,
                                     const char* key, const char* fallback) {
     for (size_t i = 0; i < count; ++i)
@@ -68,19 +101,38 @@ inline const char* recipe_param_str(const RecipeParam* params, size_t count,
     return fallback;
 }
 
-// Deterministic, header-only RNG (splitmix64). Seed from the value the engine
-// hands a generator; the same seed yields the same sequence on any thread, every
-// run. No engine RNG object crosses the ABI — the seed does (see DecompositionWorker).
+/**
+ * @brief Advance a deterministic, header-only splitmix64 RNG.
+ *
+ * Seed from the value the engine hands a generator; the same seed yields the
+ * same sequence on any thread, every run. No engine RNG object crosses the
+ * ABI — the seed does (see DecompositionWorker).
+ * @param state in/out RNG state, advanced in place
+ * @return the next 64-bit pseudo-random value
+ */
 inline uint64_t voxel_rng_next(uint64_t* state) {
     uint64_t z = (*state += 0x9E3779B97F4A7C15ull);
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
     return z ^ (z >> 31);
 }
-inline float voxel_rng_norm(uint64_t* state) {            // uniform [0,1)
+
+/**
+ * @brief Draw a uniform float in [0,1) from the splitmix64 RNG.
+ * @param state in/out RNG state, advanced in place
+ * @return a uniform value in [0,1) (24-bit mantissa precision)
+ */
+inline float voxel_rng_norm(uint64_t* state) {
     return (voxel_rng_next(state) >> 40) * (1.0f / 16777216.0f);  // 24-bit mantissa
 }
-inline uint64_t voxel_seed_mix(uint64_t a, uint64_t b) {  // fold two ints into a seed
+
+/**
+ * @brief Fold two integers into a single seed value.
+ * @param a first value to mix
+ * @param b second value to mix
+ * @return a combined seed suitable for voxel_rng_next
+ */
+inline uint64_t voxel_seed_mix(uint64_t a, uint64_t b) {
     uint64_t s = a ^ (b + 0x9E3779B97F4A7C15ull + (a << 6) + (a >> 2));
     return voxel_rng_next(&s);
 }
@@ -89,10 +141,13 @@ inline uint64_t voxel_seed_mix(uint64_t a, uint64_t b) {  // fold two ints into 
 // Callback type definitions
 // ---------------------------------------------------------------------------
 
-// Procedural layer generator: fills a chunk's voxel grid from scratch.
-//   chunk_origin — world-space origin of the chunk being generated
-//   grid_size    — voxels per side; the grid is grid_size³ (row-major, x-fastest)
-//   out_voxels   — flat array of grid_size³ Voxels to populate
+/**
+ * @brief Procedural layer generator: fills a chunk's voxel grid from scratch.
+ * @param chunk_origin world-space origin of the chunk being generated
+ * @param grid_size    voxels per side; the grid is grid_size³ (row-major, x-fastest)
+ * @param out_voxels   flat array of grid_size³ Voxels to populate
+ * @param user_data    opaque pointer supplied at registration
+ */
 using LayerGeneratorFn = void(*)(
     WorldCoord  chunk_origin,
     int         grid_size,
@@ -100,11 +155,22 @@ using LayerGeneratorFn = void(*)(
     void*       user_data
 );
 
-// Feature generator: stamps spatial structures into an already-filled child grid.
-// Examples: cave networks, ore veins, water tables, dungeon seeds. Recipe-driven
-// since M9: `params` is the EFFECTIVE param set (the recipe entry's own params
-// merged with inherited seed_parameters; the entry wins on a key collision) and
-// `seed` is the deterministic per-decomposition seed (see DecompositionWorker).
+/**
+ * @brief Feature generator: stamps spatial structures into an already-filled child grid.
+ *
+ * Examples: cave networks, ore veins, water tables, dungeon seeds. Recipe-driven
+ * since M9: @p params is the EFFECTIVE param set (the recipe entry's own params
+ * merged with inherited seed_parameters; the entry wins on a key collision) and
+ * @p seed is the deterministic per-decomposition seed (see DecompositionWorker).
+ * @param chunk_origin world-space origin of the chunk being generated
+ * @param voxel_size_m edge length of a voxel in this grid, in meters
+ * @param grid_size    voxels per side; the grid is grid_size³
+ * @param inout_voxels flat array of grid_size³ Voxels, pre-filled and mutated in place
+ * @param params       effective parameter set for this feature invocation
+ * @param param_count  number of entries in @p params
+ * @param seed         deterministic per-decomposition seed
+ * @param user_data    opaque pointer supplied at registration
+ */
 using FeatureGeneratorFn = void(*)(
     WorldCoord         chunk_origin,
     double             voxel_size_m,
@@ -116,11 +182,20 @@ using FeatureGeneratorFn = void(*)(
     void*              user_data
 );
 
-// Noise function: a pure scalar field selected by id, used by a recipe's material
-// distribution. Sampled at a WORLD position so adjacent macro voxels' child grids
-// are seamless; returns a scalar normalized to [0,1) by convention. Built-in ids
-// (value/fbm/ridged/worley) ship with the engine; register_noise adds a new id or
-// overrides a built-in (docs/ARCHITECTURE.md §6).
+/**
+ * @brief Noise function: a pure scalar field selected by id, used by a recipe's material distribution.
+ *
+ * Sampled at a WORLD position so adjacent macro voxels' child grids are seamless;
+ * returns a scalar normalized to [0,1) by convention. Built-in ids
+ * (value/fbm/ridged/worley) ship with the engine; register_noise adds a new id or
+ * overrides a built-in (docs/ARCHITECTURE.md §6).
+ * @param pos         world-space sample position
+ * @param seed        deterministic seed for this field
+ * @param params      noise parameters
+ * @param param_count number of entries in @p params
+ * @param user_data   opaque pointer supplied at registration
+ * @return a scalar normalized to [0,1) by convention
+ */
 using NoiseFn = float(*)(
     WorldCoord         pos,
     uint64_t           seed,
@@ -136,49 +211,63 @@ using NoiseFn = float(*)(
 // The engine deep-copies payload data on send.
 // ---------------------------------------------------------------------------
 
-// Opaque player identifier. kLocalPlayer (0) always refers to the local client.
+/// Opaque player identifier. kLocalPlayer (0) always refers to the local client.
 using PlayerId = uint32_t;
 static constexpr PlayerId kLocalPlayer = 0;
 
-// Message routing target.
+/// @brief Message routing target.
 enum class MessageTarget : uint8_t {
-    Broadcast,   // deliver to all connected peers
-    Server,      // deliver to the authority node only
-    Player,      // deliver to the specific peer in MessageEnvelope::target_player
+    Broadcast,   ///< deliver to all connected peers
+    Server,      ///< deliver to the authority node only
+    Player,      ///< deliver to the specific peer in MessageEnvelope::target_player
 };
 
-// Reliability class used when sending a network message.
+/// @brief Reliability class used when sending a network message.
 enum class MessageReliability : uint8_t {
     Reliable,
     Unreliable,
 };
 
-// POD envelope passed to on_network_message and send_network_message.
-// channel_id is a null-terminated string identifying the logical channel.
-// The engine never inspects the payload — routing is by envelope fields only.
+/**
+ * @brief POD envelope passed to on_network_message and send_network_message.
+ *
+ * channel_id is a null-terminated string identifying the logical channel.
+ * The engine never inspects the payload — routing is by envelope fields only.
+ */
 struct MessageEnvelope {
     const char*        channel_id    = nullptr;
     PlayerId           sender_id     = 0;
-    PlayerId           target_player = 0;      // used when target == Player
+    PlayerId           target_player = 0;      ///< used when target == Player
     MessageTarget      target        = MessageTarget::Broadcast;
     MessageReliability reliability   = MessageReliability::Reliable;
     const void*        payload       = nullptr;
     size_t             payload_size  = 0;
 };
 
-// Resolution returned by an on_edit_received handler. Transform means the
-// authority commits out_voxel (written by the handler) instead of the proposed
-// voxel. Apply is the default built-in (last-write-wins).
+/**
+ * @brief Resolution returned by an on_edit_received handler.
+ *
+ * Transform means the authority commits out_voxel (written by the handler)
+ * instead of the proposed voxel. Apply is the default built-in (last-write-wins).
+ */
 enum class EditResolution : uint8_t {
     Apply,
     Discard,
-    Transform,  // commit *out_voxel instead of the proposed voxel
+    Transform,  ///< commit *out_voxel instead of the proposed voxel
 };
 
-// Called when a terminal-layer voxel is modified by the player or simulation.
-// source is kLocalPlayer for local edits and the remote peer's id for replicated
-// ones. Single-player plugins that ignore source continue to work without change —
-// the field is appended at the end so existing registration call sites are unaffected.
+/**
+ * @brief Called when a terminal-layer voxel is modified by the player or simulation.
+ *
+ * @p source is kLocalPlayer for local edits and the remote peer's id for replicated
+ * ones. Single-player plugins that ignore source continue to work without change —
+ * the field is appended at the end so existing registration call sites are unaffected.
+ * @param position  world-space position of the modified voxel
+ * @param old_voxel the voxel's previous value
+ * @param new_voxel the voxel's new value
+ * @param source    kLocalPlayer for local edits, else the originating peer
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnVoxelModifiedFn = void(*)(
     WorldCoord   position,
     const Voxel* old_voxel,
@@ -187,83 +276,96 @@ using OnVoxelModifiedFn = void(*)(
     void*        user_data
 );
 
-// Flat-POD payload for on_structural_event (M13, docs/ARCHITECTURE.md §7/§8).
-//
-// Describes a single composite macro voxel the engine has found can no longer
-// reach structural support. It carries everything a response plugin needs to
-// decide *what to do* — clear the voxels, spawn debris, relocate material —
-// without calling back into the engine for context.
-//
-// Same flat-struct ABI rule as RecipeDesc / MessageEnvelope: no std:: type
-// crosses the boundary. The macro's layer voxel index is carried as three plain
-// int64 fields rather than the engine-internal chunkmath::VoxelCoord type, which
-// is not part of the public ABI. Field order is APPEND-ONLY — new fields go at
-// the end so existing plugins keep their offsets.
+/**
+ * @brief Flat-POD payload for on_structural_event (M13, docs/ARCHITECTURE.md §7/§8).
+ *
+ * Describes a single composite macro voxel the engine has found can no longer
+ * reach structural support. It carries everything a response plugin needs to
+ * decide *what to do* — clear the voxels, spawn debris, relocate material —
+ * without calling back into the engine for context.
+ *
+ * Same flat-struct ABI rule as RecipeDesc / MessageEnvelope: no std:: type
+ * crosses the boundary. The macro's layer voxel index is carried as three plain
+ * int64 fields rather than the engine-internal chunkmath::VoxelCoord type, which
+ * is not part of the public ABI. Field order is APPEND-ONLY — new fields go at
+ * the end so existing plugins keep their offsets.
+ */
 struct StructuralEvent {
-    WorldCoord  position;            // world-space center of the unstable macro
-    int64_t     voxel_x = 0;         // macro VoxelCoord (layer voxel index): x
-    int64_t     voxel_y = 0;         //                                       y
-    int64_t     voxel_z = 0;         //                                       z
-    const char* layer_name = nullptr;// composite layer the macro belongs to
-    double      voxel_size_m = 0.0;  // edge length of this macro in meters (its scale)
-    float       aggregate_strength = 0.0f;  // post-edit volume-weighted structural_strength
-    float       support_potential  = 0.0f;  // residual support potential; <= 0 ⇒ unstable
-    double      child_voxel_size_m = 0.0;  // edge length of the macro's terminal (editable)
-                                           // child voxels — lets a response plugin enumerate
-                                           // and clear/relocate the macro's child cells via
-                                           // apply_edit without reading back into the engine
+    WorldCoord  position;              ///< world-space center of the unstable macro
+    int64_t     voxel_x = 0;           ///< macro VoxelCoord (layer voxel index): x
+    int64_t     voxel_y = 0;           ///< macro VoxelCoord (layer voxel index): y
+    int64_t     voxel_z = 0;           ///< macro VoxelCoord (layer voxel index): z
+    const char* layer_name = nullptr;  ///< composite layer the macro belongs to
+    double      voxel_size_m = 0.0;    ///< edge length of this macro in meters (its scale)
+    float       aggregate_strength = 0.0f;  ///< post-edit volume-weighted structural_strength
+    float       support_potential  = 0.0f;  ///< residual support potential; <= 0 ⇒ unstable
+    /**< edge length of the macro's terminal (editable) child voxels — lets a
+     *   response plugin enumerate and clear/relocate the macro's child cells
+     *   via apply_edit without reading back into the engine */
+    double      child_voxel_size_m = 0.0;
 };
 
-// Called when PropagationSystem finds a composite macro voxel can no longer
-// reach structural support (collapse candidate). The engine only detects and
-// reports; the registered plugin owns the response (§7). The pointer is valid
-// only for the duration of the call — the plugin must not retain it.
+/**
+ * @brief Called when PropagationSystem finds a composite macro voxel can no longer reach structural support (collapse candidate).
+ *
+ * The engine only detects and reports; the registered plugin owns the response (§7).
+ * The pointer is valid only for the duration of the call — the plugin must not retain it.
+ * @param event     the collapse-candidate event; valid only for this call
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnStructuralEventFn = void(*)(
     const StructuralEvent* event,
     void*                  user_data
 );
 
-// Crossing direction for a sparse-overlay reporting threshold (M14, see
-// FluidEvent/ThermalFieldEvent below): Rising is the field entering the reported
-// state (e.g. fluid reaching saturation, a cell warming past ambient);
-// Falling is leaving it (fluid draining below the realized-voxel floor, a
-// cell cooling back toward ambient).
+/**
+ * @brief Crossing direction for a sparse-overlay reporting threshold (M14).
+ *
+ * See FluidEvent/ThermalFieldEvent below: Rising is the field entering the
+ * reported state (e.g. fluid reaching saturation, a cell warming past ambient);
+ * Falling is leaving it (fluid draining below the realized-voxel floor, a
+ * cell cooling back toward ambient).
+ */
 enum class FieldCrossing : uint8_t { Rising, Falling };
 
-// Flat-POD payload for on_fluid_event (M14, docs/ARCHITECTURE.md §17/§8).
-//
-// Describes a single sparse fluid-overlay cell the engine's FluidSystem has
-// found crossing a reporting threshold. Rising means the cell reached
-// tuning::fluid::kSaturationThreshold — the response plugin should realize a
-// voxel of material_id/palette_index via apply_edit; Falling means a
-// previously-realized cell drained below tuning::fluid::kMinFluidAmount — the
-// plugin should clear it. The engine only detects and reports (§7's
-// detect/respond split, reused here); it never calls apply_edit itself.
-//
-// Same flat-struct ABI rule as StructuralEvent: no std:: type crosses the
-// boundary, voxel_x/y/z is the public-ABI form of the engine-internal
-// chunkmath::VoxelCoord, and field order is APPEND-ONLY.
+/**
+ * @brief Flat-POD payload for on_fluid_event (M14, docs/ARCHITECTURE.md §17/§8).
+ *
+ * Describes a single sparse fluid-overlay cell the engine's FluidSystem has
+ * found crossing a reporting threshold. Rising means the cell reached
+ * tuning::fluid::kSaturationThreshold — the response plugin should realize a
+ * voxel of material_id/palette_index via apply_edit; Falling means a
+ * previously-realized cell drained below tuning::fluid::kMinFluidAmount — the
+ * plugin should clear it. The engine only detects and reports (§7's
+ * detect/respond split, reused here); it never calls apply_edit itself.
+ *
+ * Same flat-struct ABI rule as StructuralEvent: no std:: type crosses the
+ * boundary, voxel_x/y/z is the public-ABI form of the engine-internal
+ * chunkmath::VoxelCoord, and field order is APPEND-ONLY.
+ */
 struct FluidEvent {
-    WorldCoord    position;             // world-space center of the cell
-    int64_t       voxel_x = 0;          // terminal-layer VoxelCoord: x
-    int64_t       voxel_y = 0;          //                            y
-    int64_t       voxel_z = 0;          //                            z
-    float         amount  = 0.0f;       // fluid amount at the crossing
+    WorldCoord    position;              ///< world-space center of the cell
+    int64_t       voxel_x = 0;           ///< terminal-layer VoxelCoord: x
+    int64_t       voxel_y = 0;           ///< terminal-layer VoxelCoord: y
+    int64_t       voxel_z = 0;           ///< terminal-layer VoxelCoord: z
+    float         amount  = 0.0f;        ///< fluid amount at the crossing
     FieldCrossing crossing = FieldCrossing::Rising;
-    const char*   material_id    = nullptr;  // fluid material to realize (from register_fluid_source)
-    uint8_t       palette_index  = 0;         // material_id resolved at source-registration time
+    const char*   material_id    = nullptr;  ///< fluid material to realize (from register_fluid_source)
+    uint8_t       palette_index  = 0;        ///< material_id resolved at source-registration time
 };
 
-// Flat-POD payload for on_thermal_event (M14, docs/ARCHITECTURE.md §17/§8).
-//
-// Describes a single sparse thermal-overlay cell crossing into (Rising) or
-// out of (Falling) the active set — i.e. away from or back to
-// tuning::thermal::kAmbientTemperature. What a plugin does with a temperature
-// crossing (ignite, melt, play audio) is game policy; the engine never writes
-// a voxel for this event. Same ABI rule as FluidEvent/StructuralEvent.
-// Named ThermalFieldEvent (not ThermalEvent) to avoid a collision with the
-// Windows SDK, which defines ThermalEvent in some audio/WMI header chains
-// pulled in by MiniaudioBackend.cpp's MINIAUDIO_IMPLEMENTATION include.
+/**
+ * @brief Flat-POD payload for on_thermal_event (M14, docs/ARCHITECTURE.md §17/§8).
+ *
+ * Describes a single sparse thermal-overlay cell crossing into (Rising) or
+ * out of (Falling) the active set — i.e. away from or back to
+ * tuning::thermal::kAmbientTemperature. What a plugin does with a temperature
+ * crossing (ignite, melt, play audio) is game policy; the engine never writes
+ * a voxel for this event. Same ABI rule as FluidEvent/StructuralEvent.
+ * Named ThermalFieldEvent (not ThermalEvent) to avoid a collision with the
+ * Windows SDK, which defines ThermalEvent in some audio/WMI header chains
+ * pulled in by MiniaudioBackend.cpp's MINIAUDIO_IMPLEMENTATION include.
+ */
 struct ThermalFieldEvent {
     WorldCoord    position;
     int64_t       voxel_x = 0;
@@ -273,11 +375,13 @@ struct ThermalFieldEvent {
     FieldCrossing crossing    = FieldCrossing::Rising;
 };
 
-// Flat-POD payload for on_lighting_event (M17, docs/ARCHITECTURE.md §17/§8).
-//
-// Describes a single sparse lighting-overlay cell crossing into (Rising) or
-// out of (Falling) the active set — i.e. away from or back to
-// tuning::lighting::kAmbientBrightness. Same ABI rule as ThermalFieldEvent.
+/**
+ * @brief Flat-POD payload for on_lighting_event (M17, docs/ARCHITECTURE.md §17/§8).
+ *
+ * Describes a single sparse lighting-overlay cell crossing into (Rising) or
+ * out of (Falling) the active set — i.e. away from or back to
+ * tuning::lighting::kAmbientBrightness. Same ABI rule as ThermalFieldEvent.
+ */
 struct LightingEvent {
     WorldCoord    position;
     int64_t       voxel_x = 0;
@@ -287,33 +391,57 @@ struct LightingEvent {
     FieldCrossing crossing   = FieldCrossing::Rising;
 };
 
-// Called when LightingSystem finds a lighting-overlay cell crossing into or
-// out of the active set. Same pointer-lifetime rule as OnFluidEventFn.
+/**
+ * @brief Called when LightingSystem finds a lighting-overlay cell crossing into or out of the active set.
+ *
+ * Same pointer-lifetime rule as OnFluidEventFn.
+ * @param event     the lighting crossing event; valid only for this call
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnLightingEventFn = void(*)(
     const LightingEvent* event,
     void*                user_data
 );
 
-// Called when FluidSystem finds a fluid-overlay cell crossing a saturation or
-// drain threshold. The pointer is valid only for the duration of the call —
-// the plugin must not retain it.
+/**
+ * @brief Called when FluidSystem finds a fluid-overlay cell crossing a saturation or drain threshold.
+ *
+ * The pointer is valid only for the duration of the call — the plugin must not retain it.
+ * @param event     the fluid crossing event; valid only for this call
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnFluidEventFn = void(*)(
     const FluidEvent* event,
     void*              user_data
 );
 
-// Called when ThermalSystem finds a thermal-overlay cell crossing into or out
-// of the active set. Same pointer-lifetime rule as OnFluidEventFn.
+/**
+ * @brief Called when ThermalSystem finds a thermal-overlay cell crossing into or out of the active set.
+ *
+ * Same pointer-lifetime rule as OnFluidEventFn.
+ * @param event     the thermal crossing event; valid only for this call
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnThermalEventFn = void(*)(
     const ThermalFieldEvent* event,
     void*                user_data
 );
 
-// Called at the authority node before an edit is committed. The handler returns
-// Apply, Discard, or Transform. On Transform it writes the substituted voxel to
-// *out_voxel; on Apply/Discard out_voxel is ignored. The default built-in returns
-// Apply (last-write-wins). Must be called from the single edit-application choke
-// point (NetworkManager::applyEdit) so every edit, local or remote, passes through.
+/**
+ * @brief Called at the authority node before an edit is committed.
+ *
+ * The handler returns Apply, Discard, or Transform. On Transform it writes the
+ * substituted voxel to *out_voxel; on Apply/Discard out_voxel is ignored. The
+ * default built-in returns Apply (last-write-wins). Must be called from the
+ * single edit-application choke point (NetworkManager::applyEdit) so every
+ * edit, local or remote, passes through.
+ * @param proposing_player peer proposing the edit
+ * @param position         world-space position of the edit
+ * @param proposed_voxel   the proposed voxel value
+ * @param out_voxel        written when returning Transform
+ * @param user_data        opaque pointer supplied at registration
+ * @return Apply, Discard, or Transform
+ */
 using OnEditReceivedFn = EditResolution(*)(
     PlayerId      proposing_player,
     WorldCoord    position,
@@ -322,40 +450,68 @@ using OnEditReceivedFn = EditResolution(*)(
     void*         user_data
 );
 
-// Called after the join handshake completes (joined) or after a peer disconnects
-// or times out (left).
+/**
+ * @brief Called after the join handshake completes.
+ * @param player_id        the newly joined player
+ * @param initial_position the player's initial world position
+ * @param user_data        opaque pointer supplied at registration
+ */
 using OnPlayerJoinedFn = void(*)(
     PlayerId   player_id,
     WorldCoord initial_position,
     void*      user_data
 );
 
+/**
+ * @brief Called after a peer disconnects or times out.
+ * @param player_id the departing player
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnPlayerLeftFn = void(*)(
     PlayerId  player_id,
     void*     user_data
 );
 
-// Called when a MessageEnvelope addressed to this plugin's registered channel
-// prefix arrives. The handler must not retain the pointer beyond the call —
-// the engine owns the buffer.
+/**
+ * @brief Called when a MessageEnvelope addressed to this plugin's registered channel prefix arrives.
+ *
+ * The handler must not retain the pointer beyond the call — the engine owns the buffer.
+ * @param envelope  the inbound message; valid only for this call
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnNetworkMessageFn = void(*)(
     const MessageEnvelope* envelope,
     void*                  user_data
 );
 
-// Called at the authority for each (peer, edit) pair before the built-in
-// broadcast or radius check. Returns true to send, false to suppress. When
-// registered this overrides the built-in interest mode entirely.
+/**
+ * @brief Called at the authority for each (peer, edit) pair before the built-in broadcast or radius check.
+ *
+ * Returns true to send, false to suppress. When registered this overrides the
+ * built-in interest mode entirely.
+ * @param target_peer   candidate recipient peer
+ * @param edit_position world-space position of the edit
+ * @param user_data     opaque pointer supplied at registration
+ * @return true to send to this peer, false to suppress
+ */
 using InterestFilterFn = bool(*)(
     PlayerId   target_peer,
     WorldCoord edit_position,
     void*      user_data
 );
 
-// Called by NetworkManager to validate edit intents before they reach
-// on_edit_received. Returns true to forward, false to reject without notifying
-// the authority. When no policy is registered the engine defaults to built-in
-// server authority (all edits forwarded).
+/**
+ * @brief Called by NetworkManager to validate edit intents before they reach on_edit_received.
+ *
+ * Returns true to forward, false to reject without notifying the authority.
+ * When no policy is registered the engine defaults to built-in server
+ * authority (all edits forwarded).
+ * @param peer_id        proposing peer
+ * @param position       world-space position of the edit
+ * @param proposed_voxel the proposed voxel value
+ * @param user_data      opaque pointer supplied at registration
+ * @return true to forward the edit, false to reject it
+ */
 using AuthorityPolicyFn = bool(*)(
     PlayerId     peer_id,
     WorldCoord   position,
@@ -363,14 +519,26 @@ using AuthorityPolicyFn = bool(*)(
     void*        user_data
 );
 
-// Called when a layer chunk is created (loaded or generated) or evicted from cache.
+/**
+ * @brief Called when a layer chunk is created (loaded or generated) or evicted from cache.
+ * @param chunk_origin world-space origin of the chunk
+ * @param user_data    opaque pointer supplied at registration
+ */
 using ChunkLifecycleFn = void(*)(
     WorldCoord  chunk_origin,
     void*       user_data
 );
 
-// Import handler: reads file_data and fills out_voxels (grid_size³, x-fastest).
-// anchor is the world-space corner of the target volume. Returns 0 on success.
+/**
+ * @brief Import handler: reads file_data and fills out_voxels (grid_size³, x-fastest).
+ * @param file_data  raw file bytes
+ * @param file_size  size of @p file_data in bytes
+ * @param anchor     world-space corner of the target volume
+ * @param grid_size  voxels per side; the grid is grid_size³
+ * @param out_voxels flat array of grid_size³ Voxels to populate
+ * @param user_data  opaque pointer supplied at registration
+ * @return 0 on success
+ */
 using ImporterFn = int(*)(
     const uint8_t* file_data,
     size_t         file_size,
@@ -380,8 +548,18 @@ using ImporterFn = int(*)(
     void*          user_data
 );
 
-// Export handler: serialises in_voxels (grid_size³) to *out_data / *out_size.
-// The engine calls free() on *out_data after use. Returns 0 on success.
+/**
+ * @brief Export handler: serialises in_voxels (grid_size³) to *out_data / *out_size.
+ *
+ * The engine calls free() on *out_data after use.
+ * @param in_voxels flat array of grid_size³ Voxels to serialize
+ * @param grid_size voxels per side; the grid is grid_size³
+ * @param anchor    world-space corner of the source volume
+ * @param out_data  receives a malloc'd buffer of encoded bytes
+ * @param out_size  receives the size of *out_data in bytes
+ * @param user_data opaque pointer supplied at registration
+ * @return 0 on success
+ */
 using ExporterFn = int(*)(
     const Voxel*   in_voxels,
     int            grid_size,
@@ -399,6 +577,8 @@ using ExporterFn = int(*)(
 // networking types above. SoundParams/EmitterParams are the engine's own
 // override knobs surfaced through IAudioBackend, never leaking miniaudio directly.
 // ---------------------------------------------------------------------------
+
+/// @brief Category of audio event a material/sound binding responds to.
 enum class AudioEvent : uint8_t {
     Footstep,
     Break,
@@ -406,44 +586,56 @@ enum class AudioEvent : uint8_t {
     // Collapse / Flow reserved for M13/M14
 };
 
+/// @brief Distance-attenuation model applied to a played sound.
 enum class AttenuationModel : uint8_t {
-    Inverse,      // default — inverse-distance falloff
+    Inverse,      ///< default — inverse-distance falloff
     Linear,
     Exponential,
-    None,         // no distance attenuation
+    None,         ///< no distance attenuation
 };
 
+/// @brief Per-sound playback override knobs.
 struct SoundParams {
     float          volume       = 1.0f;
     AttenuationModel attenuation = AttenuationModel::Inverse;
     float          min_distance = 1.0f;
     float          max_distance = 100.0f;
     float          rolloff      = 1.0f;
-    float          doppler      = 0.0f;  // 0 = Doppler off (the default)
+    float          doppler      = 0.0f;  ///< 0 = Doppler off (the default)
 };
 
+/// @brief Parameters for a persistent positioned emitter.
 struct EmitterParams {
     SoundParams sound;
     bool        loop = true;
 };
 
-// Opaque handle for a persistent positioned emitter. kInvalidEmitterId (0)
-// denotes a missing or failed emitter; same sentinel convention as kInvalidPeer.
+/// Opaque handle for a persistent positioned emitter. kInvalidEmitterId (0)
+/// denotes a missing or failed emitter; same sentinel convention as kInvalidPeer.
 using AudioEmitterId = uint32_t;
 static constexpr AudioEmitterId kInvalidEmitterId = 0;
 
 // ---------------------------------------------------------------------------
 // Per-frame tick callback (M17 B1, docs/ARCHITECTURE.md §8)
-//
-// Called once per frame by Engine::update with the frame's elapsed dt (seconds).
-// The kinematic-body plugin registers one of these to step all bodies each frame.
 // ---------------------------------------------------------------------------
+
+/**
+ * @brief Called once per frame by Engine::update with the frame's elapsed dt (seconds).
+ *
+ * The kinematic-body plugin registers one of these to step all bodies each frame.
+ * @param dt        elapsed time this frame, in seconds
+ * @param user_data opaque pointer supplied at registration
+ */
 using OnTickFn = void(*)(double dt, void* user_data);
 
-// Move result returned by the plugin ABI's move_aabb — a flat-POD mirror of
-// the engine-internal voxelcollide::MoveResult. Same field semantics: position
-// is the resolved center, grounded is true when blocked along the gravity
-// vector, and hitX/hitY/hitZ report per-axis wall contact.
+/**
+ * @brief Move result returned by the plugin ABI's move_aabb.
+ *
+ * A flat-POD mirror of the engine-internal voxelcollide::MoveResult. Same
+ * field semantics: position is the resolved center, grounded is true when
+ * blocked along the gravity vector, and hitX/hitY/hitZ report per-axis wall
+ * contact.
+ */
 struct BodyMoveResult {
     WorldCoord position;
     bool       grounded = false;
@@ -461,111 +653,126 @@ struct BodyMoveResult {
 // material lookup and the feature/noise registries) when a decomposition job is
 // built on the main thread, keeping DecompositionWorker off PluginManager (§13).
 // ---------------------------------------------------------------------------
+
+/// @brief One weighted material entry in a DistributionDesc.
 struct MaterialWeight {
-    const char* material_id = nullptr;  // resolved to MaterialProperties via the M8 lookup
-    float       weight      = 0.0f;     // relative; normalized across the list
+    const char* material_id = nullptr;  ///< resolved to MaterialProperties via the M8 lookup
+    float       weight      = 0.0f;     ///< relative; normalized across the list
 };
 
-// A weighted material distribution arranged spatially by a named noise field.
+/// @brief A weighted material distribution arranged spatially by a named noise field.
 struct DistributionDesc {
     const MaterialWeight* materials         = nullptr;
     size_t                material_count    = 0;
-    const char*           noise_id          = nullptr;  // nullptr => built-in "value"
+    const char*           noise_id          = nullptr;  ///< nullptr => built-in "value"
     const RecipeParam*    noise_params      = nullptr;
     size_t                noise_param_count = 0;
 };
 
-// One ordered feature overlay reference with its params.
+/// @brief One ordered feature overlay reference with its params.
 struct FeatureRef {
     const char*        generator_id = nullptr;
     const RecipeParam* params       = nullptr;
     size_t             param_count  = 0;
 };
 
-// How a boundary override measures its `depth` (M18.5).
+/// @brief How a boundary override measures its `depth` (M18.5).
 enum class BoundaryMode : uint8_t {
-    // `depth` child layers inward from the macro voxel's geometric face. The
-    // historical behavior, and the default (zero-initialized) — a cap lands on the
-    // macro cube's face regardless of where the carved surface sits.
+    /**< `depth` child layers inward from the macro voxel's geometric face. The
+     *   historical behavior, and the default (zero-initialized) — a cap lands on
+     *   the macro cube's face regardless of where the carved surface sits. */
     MacroFace,
-    // `depth` solid cells inward from the CARVED surface of each column — the cap
-    // tracks the occupancy surface (a sloped heightmap, a radial well) instead of
-    // a flat macro face. Meaningful for `top` and `bottom` only (the gravity-axis
-    // faces); a `side` boundary in this mode paints nothing (a `side` surface has
-    // no well-defined column and is left to the interior). Without an occupancy
-    // stage the "surface" is the macro face, so this reduces to MacroFace.
+    /**< `depth` solid cells inward from the CARVED surface of each column — the
+     *   cap tracks the occupancy surface (a sloped heightmap, a radial well)
+     *   instead of a flat macro face. Meaningful for `top` and `bottom` only
+     *   (the gravity-axis faces); a `side` boundary in this mode paints nothing
+     *   (a `side` surface has no well-defined column and is left to the
+     *   interior). Without an occupancy stage the "surface" is the macro face,
+     *   so this reduces to MacroFace. */
     Surface,
 };
 
-// A per-face boundary override (top / bottom / side). `depth` is how many
-// child-voxel layers inward from the face (MacroFace) or carved surface (Surface)
-// it replaces; `present == false` leaves the face to the interior distribution.
+/**
+ * @brief A per-face boundary override (top / bottom / side).
+ *
+ * `depth` is how many child-voxel layers inward from the face (MacroFace) or
+ * carved surface (Surface) it replaces; `present == false` leaves the face to
+ * the interior distribution.
+ */
 struct BoundaryDesc {
     DistributionDesc distribution;
     int              depth   = 1;
     bool             present = false;
-    BoundaryMode     mode    = BoundaryMode::MacroFace;  // appended (M18.5)
+    BoundaryMode     mode    = BoundaryMode::MacroFace;  ///< appended (M18.5)
 };
 
-// An optional occupancy (carve) stage that decides which child cells of a
-// decomposing macro are solid at all, BEFORE any material is assigned (M18.5,
-// docs/proposals/recipe-occupancy.md). Without it a recipe fills the macro's
-// whole subvolume solid (a solid cube refines to a smaller-voxel solid cube), so
-// recipes cannot follow a surface; with it a cell whose sampled field value is
-// below `threshold` is left empty, letting a recipe-driven composite layer track
-// a heightmap / signed-distance surface.
-//
-// The field is a registered NoiseFn (the same ABI a distribution noise uses),
-// sampled at the child voxel's WORLD-space center so adjacent macros' grids stay
-// seamless. A plugin registers it once via register_noise (e.g. a height field
-// whose value encodes signed distance to its surface) and names it here.
-//
-// Carve-only: it may turn a cell empty but never solid, so the coarse-supersets-
-// fine invariant (ARCHITECTURE §4) holds by construction. Zero-initialized
-// (`present == false`) means "fully solid" — exactly the pre-M18.5 behavior, so
-// existing recipes are byte-identical.
+/**
+ * @brief An optional occupancy (carve) stage deciding which child cells of a decomposing macro are solid at all, BEFORE any material is assigned (M18.5, docs/proposals/recipe-occupancy.md).
+ *
+ * Without it a recipe fills the macro's whole subvolume solid (a solid cube
+ * refines to a smaller-voxel solid cube), so recipes cannot follow a surface;
+ * with it a cell whose sampled field value is below `threshold` is left empty,
+ * letting a recipe-driven composite layer track a heightmap / signed-distance
+ * surface.
+ *
+ * The field is a registered NoiseFn (the same ABI a distribution noise uses),
+ * sampled at the child voxel's WORLD-space center so adjacent macros' grids stay
+ * seamless. A plugin registers it once via register_noise (e.g. a height field
+ * whose value encodes signed distance to its surface) and names it here.
+ *
+ * Carve-only: it may turn a cell empty but never solid, so the coarse-supersets-
+ * fine invariant (ARCHITECTURE §4) holds by construction. Zero-initialized
+ * (`present == false`) means "fully solid" — exactly the pre-M18.5 behavior, so
+ * existing recipes are byte-identical.
+ */
 struct OccupancyDesc {
-    const char*        noise_id    = nullptr;  // nullptr => built-in "value"
-    float              threshold   = 0.0f;     // solid iff sampled value >= threshold
-    const RecipeParam* params      = nullptr;  // merged under inherited seed params
+    const char*        noise_id    = nullptr;  ///< nullptr => built-in "value"
+    float              threshold   = 0.0f;     ///< solid iff sampled value >= threshold
+    const RecipeParam* params      = nullptr;  ///< merged under inherited seed params
     size_t             param_count = 0;
     bool               present     = false;
 };
 
+/// @brief Full recipe description passed to register_recipe for a composite layer.
 struct RecipeDesc {
-    DistributionDesc   interior;                       // the bulk distribution
+    DistributionDesc   interior;                       ///< the bulk distribution
 
-    const FeatureRef*  features             = nullptr; // applied in array order
+    const FeatureRef*  features             = nullptr; ///< applied in array order
     size_t             feature_count        = 0;
 
-    BoundaryDesc       top;                            // overlap order at edges/corners:
-    BoundaryDesc       bottom;                         //   bottom -> side -> top (top wins)
-    BoundaryDesc       side;                           // shared by all four lateral faces
+    BoundaryDesc       top;                            ///< overlap order at edges/corners:
+    BoundaryDesc       bottom;                         ///<   bottom -> side -> top (top wins)
+    BoundaryDesc       side;                           ///< shared by all four lateral faces
 
-    const RecipeParam* seed_parameters      = nullptr; // biases the layer below
+    const RecipeParam* seed_parameters      = nullptr; ///< biases the layer below
     size_t             seed_parameter_count = 0;
 
-    OccupancyDesc      occupancy;                       // optional carve stage (M18.5);
-                                                        // appended (ABI append-only rule),
-                                                        // zero-init = absent = today
+    /**< optional carve stage (M18.5); appended (ABI append-only rule),
+     *   zero-init = absent = today */
+    OccupancyDesc      occupancy;
 };
 
 // ---------------------------------------------------------------------------
 // Plugin context
-//
-// The engine constructs one PluginContext and passes it to each plugin's init
-// function. Plugins call the register_* function pointers to register callbacks.
-// engine_data is an opaque engine pointer; plugins must not read or write it.
-//
-// Lifetime: the engine keeps each plugin's PluginContext alive for as long as the
-// plugin is loaded, so a plugin MAY retain the ctx pointer and invoke its function
-// pointers from its own callbacks after init returns (e.g. calling play_sound /
-// play_material_sound / send_network_message from an on_voxel_modified or
-// on_network_message handler). The pointer is stable until the plugin is unloaded.
 // ---------------------------------------------------------------------------
-struct PluginContext {
-    void* engine_data;  // opaque; used internally by the engine
 
+/**
+ * @brief The central plugin ABI: a function-pointer table the engine hands to every plugin's init function.
+ *
+ * The engine constructs one PluginContext and passes it to each plugin's init
+ * function. Plugins call the register_* function pointers to register callbacks.
+ * engine_data is an opaque engine pointer; plugins must not read or write it.
+ *
+ * @note Lifetime: the engine keeps each plugin's PluginContext alive for as long as the
+ * plugin is loaded, so a plugin MAY retain the ctx pointer and invoke its function
+ * pointers from its own callbacks after init returns (e.g. calling play_sound /
+ * play_material_sound / send_network_message from an on_voxel_modified or
+ * on_network_message handler). The pointer is stable until the plugin is unloaded.
+ */
+struct PluginContext {
+    void* engine_data;  ///< opaque; used internally by the engine
+
+    /// Register a full-chunk generator for the named layer.
     void (*register_layer_generator)(
         PluginContext*    ctx,
         const char*       layer_name,
@@ -573,6 +780,7 @@ struct PluginContext {
         void*             user_data
     );
 
+    /// Register a feature-stamping generator under generator_id, for use by recipes.
     void (*register_feature_generator)(
         PluginContext*     ctx,
         const char*        generator_id,
@@ -580,12 +788,14 @@ struct PluginContext {
         void*              user_data
     );
 
+    /// Register a composition recipe for the named composite layer. @p recipe is deep-copied; need not outlive the call.
     void (*register_recipe)(
         PluginContext*    ctx,
         const char*       layer_name,
-        const RecipeDesc* recipe          // deep-copied; need not outlive the call
+        const RecipeDesc* recipe
     );
 
+    /// Register a named noise field, overriding a built-in id if it collides.
     void (*register_noise)(
         PluginContext* ctx,
         const char*    noise_id,
@@ -593,27 +803,34 @@ struct PluginContext {
         void*          user_data
     );
 
+    /// Register a named material's physical properties.
     void (*register_material)(
         PluginContext*     ctx,
         const char*        material_id,
         MaterialProperties props
     );
 
-    // Install an ABGR colour (0xAABBGGRR) at the given palette index. Lets plugins
-    // pair a material's palette_index with a meaningful visual colour rather than
-    // relying on the default cycling palette (where some slots are translucent).
+    /**
+     * @brief Install an ABGR colour (0xAABBGGRR) at the given palette index.
+     *
+     * Lets plugins pair a material's palette_index with a meaningful visual
+     * colour rather than relying on the default cycling palette (where some
+     * slots are translucent).
+     */
     void (*set_palette_color)(
         PluginContext* ctx,
         uint8_t        index,
         uint32_t       abgr
     );
 
+    /// Register a handler for terminal-layer voxel modifications.
     void (*register_on_voxel_modified)(
         PluginContext*     ctx,
         OnVoxelModifiedFn  fn,
         void*              user_data
     );
 
+    /// Register a handler for structural-collapse candidate events.
     void (*register_on_structural_event)(
         PluginContext*       ctx,
         OnStructuralEventFn  fn,
@@ -624,33 +841,42 @@ struct PluginContext {
     // Fluid / thermal hooks and sources (M14, docs/ARCHITECTURE.md §17/§8)
     // -----------------------------------------------------------------------
 
+    /// Register a handler for fluid-overlay saturation/drain crossing events.
     void (*register_on_fluid_event)(
         PluginContext*   ctx,
         OnFluidEventFn   fn,
         void*            user_data
     );
 
+    /// Register a handler for thermal-overlay active-set crossing events.
     void (*register_on_thermal_event)(
         PluginContext*     ctx,
         OnThermalEventFn   fn,
         void*              user_data
     );
 
-    // Register a heat emitter: the engine injects `rate` into the thermal
-    // overlay at pos every tick for as long as the registering plugin stays
-    // loaded. Owner-tracked like the recipe/material/sound registries — torn
-    // down automatically on unload.
+    /**
+     * @brief Register a heat emitter.
+     *
+     * The engine injects `rate` into the thermal overlay at pos every tick for
+     * as long as the registering plugin stays loaded. Owner-tracked like the
+     * recipe/material/sound registries — torn down automatically on unload.
+     */
     void (*register_heat_source)(
         PluginContext* ctx,
         WorldCoord     pos,
         float          rate
     );
 
-    // Register a fluid emitter: the engine injects `rate` into the fluid
-    // overlay at pos every tick. fluid_material names the material the
-    // mandatory flow plugin will realize when this emitter's fluid saturates
-    // a cell (resolved to a palette_index at registration time, the
-    // register_material_sound pattern). Owner-tracked; torn down on unload.
+    /**
+     * @brief Register a fluid emitter.
+     *
+     * The engine injects `rate` into the fluid overlay at pos every tick.
+     * fluid_material names the material the mandatory flow plugin will realize
+     * when this emitter's fluid saturates a cell (resolved to a palette_index
+     * at registration time, the register_material_sound pattern).
+     * Owner-tracked; torn down on unload.
+     */
     void (*register_fluid_source)(
         PluginContext* ctx,
         WorldCoord     pos,
@@ -662,23 +888,29 @@ struct PluginContext {
     // Lighting hooks (M17, ARCHITECTURE §17)
     // -----------------------------------------------------------------------
 
+    /// Register a handler for lighting-overlay active-set crossing events.
     void (*register_on_lighting_event)(
         PluginContext*      ctx,
         OnLightingEventFn   fn,
         void*               user_data
     );
 
-    // Register a point light source: the engine injects `brightness` into the
-    // lighting overlay at pos and propagates it each tick. Owner-tracked;
-    // torn down on plugin unload. For material-intrinsic emission, set
-    // light_emission on the MaterialProperties instead — the LightingSystem
-    // discovers emitting voxels automatically from the resident voxel grid.
+    /**
+     * @brief Register a point light source.
+     *
+     * The engine injects `brightness` into the lighting overlay at pos and
+     * propagates it each tick. Owner-tracked; torn down on plugin unload. For
+     * material-intrinsic emission, set light_emission on the
+     * MaterialProperties instead — the LightingSystem discovers emitting
+     * voxels automatically from the resident voxel grid.
+     */
     void (*register_light_source)(
         PluginContext* ctx,
         WorldCoord     pos,
         float          brightness
     );
 
+    /// Register a handler for chunk creation in the named layer.
     void (*register_on_chunk_created)(
         PluginContext*    ctx,
         const char*       layer_name,
@@ -686,6 +918,7 @@ struct PluginContext {
         void*             user_data
     );
 
+    /// Register a handler for chunk eviction in the named layer.
     void (*register_on_chunk_evicted)(
         PluginContext*    ctx,
         const char*       layer_name,
@@ -693,6 +926,7 @@ struct PluginContext {
         void*             user_data
     );
 
+    /// Register an import handler for the given file extension.
     void (*register_importer)(
         PluginContext* ctx,
         const char*    extension,
@@ -700,6 +934,7 @@ struct PluginContext {
         void*          user_data
     );
 
+    /// Register an export handler for the given file extension.
     void (*register_exporter)(
         PluginContext* ctx,
         const char*    extension,
@@ -711,31 +946,39 @@ struct PluginContext {
     // Networking hooks (M11, docs/ARCHITECTURE.md §15)
     // -----------------------------------------------------------------------
 
-    // Register a handler that fires before any edit is committed at the
-    // authority. At most one handler is active; re-registering overwrites the
-    // previous one (with a logged warning). Pass nullptr to restore the default
-    // built-in Apply (last-write-wins) behaviour.
+    /**
+     * @brief Register a handler that fires before any edit is committed at the authority.
+     *
+     * At most one handler is active; re-registering overwrites the previous
+     * one (with a logged warning). Pass nullptr to restore the default
+     * built-in Apply (last-write-wins) behaviour.
+     */
     void (*register_on_edit_received)(
         PluginContext*   ctx,
         OnEditReceivedFn fn,
         void*            user_data
     );
 
+    /// Register a handler called after a player's join handshake completes.
     void (*register_on_player_joined)(
         PluginContext*   ctx,
         OnPlayerJoinedFn fn,
         void*            user_data
     );
 
+    /// Register a handler called after a player disconnects or times out.
     void (*register_on_player_left)(
         PluginContext* ctx,
         OnPlayerLeftFn fn,
         void*          user_data
     );
 
-    // Register a handler for inbound messages whose channel_id begins with
-    // channel_prefix. Multiple handlers may be registered; all matching ones
-    // are called in registration order.
+    /**
+     * @brief Register a handler for inbound messages whose channel_id begins with channel_prefix.
+     *
+     * Multiple handlers may be registered; all matching ones are called in
+     * registration order.
+     */
     void (*register_on_network_message)(
         PluginContext*      ctx,
         const char*          channel_prefix,
@@ -743,27 +986,37 @@ struct PluginContext {
         void*                user_data
     );
 
-    // Send a message to the target(s) described by the envelope. The engine
-    // deep-copies the payload; the caller need not keep the buffer alive after
-    // the call returns.
+    /**
+     * @brief Send a message to the target(s) described by the envelope.
+     *
+     * The engine deep-copies the payload; the caller need not keep the buffer
+     * alive after the call returns.
+     */
     void (*send_network_message)(
         PluginContext*         ctx,
         const MessageEnvelope* envelope
     );
 
-    // Register an authority-policy validator. Called for each incoming edit
-    // intent before it reaches on_edit_received. Returning false rejects the
-    // edit without informing the authority. Only one policy may be active;
-    // re-registering overwrites with a logged warning.
+    /**
+     * @brief Register an authority-policy validator.
+     *
+     * Called for each incoming edit intent before it reaches on_edit_received.
+     * Returning false rejects the edit without informing the authority. Only
+     * one policy may be active; re-registering overwrites with a logged
+     * warning.
+     */
     void (*register_authority_policy)(
         PluginContext*    ctx,
         AuthorityPolicyFn fn,
         void*             user_data
     );
 
-    // Register an interest filter that overrides the built-in broadcast /
-    // streaming-radius mode. Only one filter may be active; re-registering
-    // overwrites with a logged warning.
+    /**
+     * @brief Register an interest filter that overrides the built-in broadcast / streaming-radius mode.
+     *
+     * Only one filter may be active; re-registering overwrites with a logged
+     * warning.
+     */
     void (*register_interest_filter)(
         PluginContext*   ctx,
         InterestFilterFn fn,
@@ -776,9 +1029,13 @@ struct PluginContext {
     // hook; these add sound registration and playback primitives only.
     // -----------------------------------------------------------------------
 
-    // Register a named sound asset.  params sets defaults for all plays of this
-    // sound; individual play calls may override them.  Owner-tracked: the asset
-    // record is removed when the registering plugin unloads.
+    /**
+     * @brief Register a named sound asset.
+     *
+     * params sets defaults for all plays of this sound; individual play calls
+     * may override them. Owner-tracked: the asset record is removed when the
+     * registering plugin unloads.
+     */
     void (*register_sound)(
         PluginContext*   ctx,
         const char*      sound_id,
@@ -786,9 +1043,13 @@ struct PluginContext {
         SoundParams      params    // by value — POD, no std:: across the ABI
     );
 
-    // Bind (material_id, AudioEvent) → sound_id.  The engine resolves
-    // material_id → palette_index at registration so play-time lookup is keyed
-    // by the index the voxel actually carries (ARCHITECTURE §16).  Owner-tracked.
+    /**
+     * @brief Bind (material_id, AudioEvent) → sound_id.
+     *
+     * The engine resolves material_id → palette_index at registration so
+     * play-time lookup is keyed by the index the voxel actually carries
+     * (ARCHITECTURE §16). Owner-tracked.
+     */
     void (*register_material_sound)(
         PluginContext* ctx,
         const char*    material_id,
@@ -796,11 +1057,15 @@ struct PluginContext {
         const char*    sound_id
     );
 
-    // Fire-and-forget positional one-shot.  pos is a WorldCoord; AudioManager
-    // projects it to camera-local float before submitting to the backend.
-    // params may be nullptr to use the defaults registered with the sound.
-    // Fail-soft: plays nothing when sound_id is unregistered or AudioManager
-    // is not attached (audio is a pure sink — §4).
+    /**
+     * @brief Fire-and-forget positional one-shot.
+     *
+     * pos is a WorldCoord; AudioManager projects it to camera-local float
+     * before submitting to the backend. params may be nullptr to use the
+     * defaults registered with the sound. Fail-soft: plays nothing when
+     * sound_id is unregistered or AudioManager is not attached (audio is a
+     * pure sink — §4).
+     */
     void (*play_sound)(
         PluginContext*     ctx,
         const char*        sound_id,
@@ -808,8 +1073,11 @@ struct PluginContext {
         const SoundParams* params
     );
 
-    // Resolve (AudioEvent, palette_index) → sound_id via the material-sound
-    // registry and play.  Fail-soft when the binding is not found.
+    /**
+     * @brief Resolve (AudioEvent, palette_index) → sound_id via the material-sound registry and play.
+     *
+     * Fail-soft when the binding is not found.
+     */
     void (*play_material_sound)(
         PluginContext* ctx,
         AudioEvent     event,
@@ -817,9 +1085,13 @@ struct PluginContext {
         WorldCoord     pos
     );
 
-    // Persistent looping emitter.  Returns kInvalidEmitterId on failure.
-    // The emitter is owner-tracked: plugin unload stops all of its emitters so
-    // none dangle past the library handle.
+    /**
+     * @brief Create a persistent looping emitter.
+     *
+     * Returns kInvalidEmitterId on failure. The emitter is owner-tracked:
+     * plugin unload stops all of its emitters so none dangle past the library
+     * handle.
+     */
     AudioEmitterId (*create_emitter)(
         PluginContext*       ctx,
         const char*          sound_id,
@@ -827,14 +1099,14 @@ struct PluginContext {
         const EmitterParams* params
     );
 
-    // Re-project an emitter's WorldCoord each tick. Safe to call every frame.
+    /// Re-project an emitter's WorldCoord each tick. Safe to call every frame.
     void (*set_emitter_position)(
         PluginContext*  ctx,
         AudioEmitterId  id,
         WorldCoord      pos
     );
 
-    // Stop and destroy an emitter.  Idempotent for kInvalidEmitterId.
+    /// Stop and destroy an emitter. Idempotent for kInvalidEmitterId.
     void (*stop_emitter)(
         PluginContext*  ctx,
         AudioEmitterId  id
@@ -844,17 +1116,21 @@ struct PluginContext {
     // World edit (M13, docs/ARCHITECTURE.md §7/§8)
     // -----------------------------------------------------------------------
 
-    // Apply a voxel edit through the engine's single edit choke point — the same
-    // path every player and replicated network edit takes (NetworkManager::
-    // applyEdit → World::setVoxel → on_voxel_modified). This is the *public edit
-    // path* a structural-response plugin uses to act on an on_structural_event:
-    // because the write returns through on_voxel_modified, the structural pass
-    // re-dirties the parent macro and the cascade feedback loop closes without any
-    // in-engine collapse routine (§7). pos is a WorldCoord at the terminal layer;
-    // voxel is copied (need not outlive the call) — pass an empty voxel to clear.
-    // Fail-soft: a no-op when no edit handler is installed (no NetworkManager
-    // attached), so a plugin that calls it in a non-networked host does nothing
-    // rather than crashing.
+    /**
+     * @brief Apply a voxel edit through the engine's single edit choke point.
+     *
+     * The same path every player and replicated network edit takes
+     * (NetworkManager::applyEdit → World::setVoxel → on_voxel_modified). This
+     * is the *public edit path* a structural-response plugin uses to act on an
+     * on_structural_event: because the write returns through
+     * on_voxel_modified, the structural pass re-dirties the parent macro and
+     * the cascade feedback loop closes without any in-engine collapse routine
+     * (§7). pos is a WorldCoord at the terminal layer; voxel is copied (need
+     * not outlive the call) — pass an empty voxel to clear.
+     * @note Fail-soft: a no-op when no edit handler is installed (no
+     * NetworkManager attached), so a plugin that calls it in a non-networked
+     * host does nothing rather than crashing.
+     */
     void (*apply_edit)(
         PluginContext* ctx,
         WorldCoord     pos,
@@ -865,27 +1141,35 @@ struct PluginContext {
     // Textured rendering (M15, docs/m15-textured-voxels-audit.md T3)
     // -----------------------------------------------------------------------
 
-    // Register an image asset for the shared material texture atlas. The engine
-    // decodes the image at `path` (PNG/JPEG/… via bimg) and packs it into the
-    // atlas the voxel shader samples. `texture_id` names the resulting tile so a
-    // later (palette_index, face) → tile binding (T4) and the importer (T6) can
-    // refer to it. Owner-tracked, mirroring register_sound: the tile is removed
-    // and the atlas rebuilt when the registering plugin unloads (the §8 teardown
-    // contract). Fail-soft: a no-op when no texture pipeline is attached (a
-    // headless or audio-only host), so registration never crashes.
+    /**
+     * @brief Register an image asset for the shared material texture atlas.
+     *
+     * The engine decodes the image at `path` (PNG/JPEG/… via bimg) and packs
+     * it into the atlas the voxel shader samples. `texture_id` names the
+     * resulting tile so a later (palette_index, face) → tile binding (T4) and
+     * the importer (T6) can refer to it. Owner-tracked, mirroring
+     * register_sound: the tile is removed and the atlas rebuilt when the
+     * registering plugin unloads (the §8 teardown contract).
+     * @note Fail-soft: a no-op when no texture pipeline is attached (a
+     * headless or audio-only host), so registration never crashes.
+     */
     void (*register_texture)(
         PluginContext* ctx,
         const char*    texture_id,
         const char*    path
     );
 
-    // Register an in-memory image for the atlas (M15 T3/T6). Identical to
-    // register_texture but the encoded image bytes (PNG/JPEG/… as bimg decodes)
-    // are supplied directly rather than read from a path — the form a Blockbench
-    // importer needs, since a .bbmodel embeds its textures as base64 data URIs
-    // with no file on disk. The engine COPIES the bytes, so the caller's buffer
-    // need not outlive the call. Owner-tracked and fail-soft exactly like
-    // register_texture; a texture_id already registered is overwritten.
+    /**
+     * @brief Register an in-memory image for the atlas (M15 T3/T6).
+     *
+     * Identical to register_texture but the encoded image bytes (PNG/JPEG/…
+     * as bimg decodes) are supplied directly rather than read from a path —
+     * the form a Blockbench importer needs, since a .bbmodel embeds its
+     * textures as base64 data URIs with no file on disk. The engine COPIES
+     * the bytes, so the caller's buffer need not outlive the call.
+     * Owner-tracked and fail-soft exactly like register_texture; a
+     * texture_id already registered is overwritten.
+     */
     void (*register_texture_data)(
         PluginContext* ctx,
         const char*    texture_id,
@@ -893,23 +1177,28 @@ struct PluginContext {
         size_t         size
     );
 
-    // Bind a material's faces to texture-atlas tiles by texture_id (M15 T4).
-    // Echoes set_palette_color: it keys on the palette_index every voxel already
-    // carries, so NO field is added to Voxel / MaterialProperties — the POD, the
-    // memcmp determinism padding, RLE persistence (§9), and the plugin ABI are all
-    // preserved. `top` is the +Y face, `bottom` the -Y face, and `side` is shared
-    // by all four lateral faces (the BoundaryDesc top/bottom/side convention); a
-    // null face leaves it unbound and renders the white tile. `texture_id`s are the
-    // names passed to register_texture; they resolve to atlas tiles once the atlas
-    // is built, and a binding falls back to white when its texture's owner unloads
-    // (the atlas rebuilds without it) — so this needs no separate teardown.
-    //
-    // tiling_factor is tiles per world meter (pass 1 for one authored image per
-    // face): because the binding keys on material and NOT voxel size, one texture
-    // is scale-agnostic — the mesh builder emits face_world_size × tiling_factor
-    // tile copies across a face (T5), so the same tile serves a 1 m terminal voxel
-    // and a large composite block. Fail-soft: a global runtime table write, a no-op
-    // for an out-of-range index, never crashes a headless host.
+    /**
+     * @brief Bind a material's faces to texture-atlas tiles by texture_id (M15 T4).
+     *
+     * Echoes set_palette_color: it keys on the palette_index every voxel
+     * already carries, so NO field is added to Voxel / MaterialProperties —
+     * the POD, the memcmp determinism padding, RLE persistence (§9), and the
+     * plugin ABI are all preserved. `top` is the +Y face, `bottom` the -Y
+     * face, and `side` is shared by all four lateral faces (the
+     * BoundaryDesc top/bottom/side convention); a null face leaves it unbound
+     * and renders the white tile. `texture_id`s are the names passed to
+     * register_texture; they resolve to atlas tiles once the atlas is built,
+     * and a binding falls back to white when its texture's owner unloads
+     * (the atlas rebuilds without it) — so this needs no separate teardown.
+     *
+     * tiling_factor is tiles per world meter (pass 1 for one authored image
+     * per face): because the binding keys on material and NOT voxel size, one
+     * texture is scale-agnostic — the mesh builder emits face_world_size ×
+     * tiling_factor tile copies across a face (T5), so the same tile serves a
+     * 1 m terminal voxel and a large composite block.
+     * @note Fail-soft: a global runtime table write, a no-op for an
+     * out-of-range index, never crashes a headless host.
+     */
     void (*set_material_faces)(
         PluginContext* ctx,
         uint8_t        palette_index,
@@ -923,21 +1212,28 @@ struct PluginContext {
     // Noise registry access (M16, C2; docs/ARCHITECTURE.md §6)
     // -----------------------------------------------------------------------
 
-    // Resolve a noise function by id from the engine's noise registry. This is
-    // the *consume* counterpart to register_noise: an out-of-tree generator pulls
-    // the built-in fbm/worley (or a register_noise-overridden id) for surface
-    // relief instead of hand-rolling its own value noise. Returns the winning
-    // NoiseFn for noise_id — a plugin register_noise of that id overrides the
-    // built-in floor (value/fbm/ridged/worley) — or nullptr when no noise with
-    // that id is registered (the §6 contract: an unknown id resolves to null so
-    // the caller can fail loudly rather than silently mis-generate).
-    //
-    // The built-in noise floor exists from PluginManager construction, so this is
-    // safe to call from a plugin's init even in a host that never calls
-    // Engine::init. Built-in noise ignores its user_data argument, so the returned
-    // fn is meant to be invoked with a null user_data; a noise that needs
-    // per-registration user_data is not resolvable through this bare-NoiseFn
-    // accessor (none of the built-ins do).
+    /**
+     * @brief Resolve a noise function by id from the engine's noise registry.
+     *
+     * This is the *consume* counterpart to register_noise: an out-of-tree
+     * generator pulls the built-in fbm/worley (or a register_noise-overridden
+     * id) for surface relief instead of hand-rolling its own value noise.
+     * Returns the winning NoiseFn for noise_id — a plugin register_noise of
+     * that id overrides the built-in floor (value/fbm/ridged/worley) — or
+     * nullptr when no noise with that id is registered (the §6 contract: an
+     * unknown id resolves to null so the caller can fail loudly rather than
+     * silently mis-generate).
+     *
+     * The built-in noise floor exists from PluginManager construction, so
+     * this is safe to call from a plugin's init even in a host that never
+     * calls Engine::init. Built-in noise ignores its user_data argument, so
+     * the returned fn is meant to be invoked with a null user_data; a noise
+     * that needs per-registration user_data is not resolvable through this
+     * bare-NoiseFn accessor (none of the built-ins do).
+     * @param ctx      the plugin context
+     * @param noise_id id of the noise function to resolve
+     * @return the winning NoiseFn for @p noise_id, or nullptr if unregistered
+     */
     NoiseFn (*resolve_noise)(
         PluginContext* ctx,
         const char*    noise_id
@@ -955,12 +1251,28 @@ struct PluginContext {
     // kinematic-body plugin can call it without linking engine internals.
     // -----------------------------------------------------------------------
 
+    /// Register a per-frame tick handler, called once per frame with the elapsed dt.
     void (*register_on_tick)(
         PluginContext* ctx,
         OnTickFn       fn,
         void*          user_data
     );
 
+    /**
+     * @brief Sweep-and-resolve AABB collision against the resident voxel grid.
+     * @param ctx           the plugin context
+     * @param center        AABB center before the move
+     * @param half_x        half-extent along X
+     * @param half_y        half-extent along Y
+     * @param half_z        half-extent along Z
+     * @param delta_x       requested displacement along X
+     * @param delta_y       requested displacement along Y
+     * @param delta_z       requested displacement along Z
+     * @param gravity_dir_x gravity direction unit vector, X component
+     * @param gravity_dir_y gravity direction unit vector, Y component
+     * @param gravity_dir_z gravity direction unit vector, Z component
+     * @return the resolved position and per-axis/grounded contact flags
+     */
     BodyMoveResult (*move_aabb)(
         PluginContext* ctx,
         WorldCoord     center,

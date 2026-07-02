@@ -7,7 +7,7 @@ code that puts a single voxel on screen.
 
 ## Prerequisites
 
-- A C++17 compiler (GCC 10+, Clang 12+, or MSVC 2019+)
+- A C++20 compiler (GCC 10+, Clang 12+, or MSVC 2019+)
 - CMake 3.20 or later
 - Git
 - A desktop GPU with OpenGL 3.3 or Metal support
