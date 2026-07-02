@@ -96,3 +96,9 @@ ambient_bed.wav
 # ─── Mega-demo (20) runtime-synthesised tiles + sounds ───────────────
 assets/textures/overworld/
 assets/audio/nature/
+
+# ─── Generated API docs (docs/Doxyfile) ──────────────────────────────
+# doxygen-awesome-css is fetched at build time (docs/fetch-doxygen-theme.sh),
+# not vendored; Doxygen's HTML output is build output, not source.
+docs/doxygen-awesome/
+docs/_build/

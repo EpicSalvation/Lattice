@@ -1,0 +1,85 @@
+# Doxyfile for the Lattice public API reference.
+#
+# This is a hand-trimmed config, not the full ~2700-line generated default —
+# only settings that diverge from Doxygen's defaults are listed below. Run
+# `docs/fetch-doxygen-theme.sh` once first (fetches doxygen-awesome-css into
+# docs/doxygen-awesome/, git-ignored). Doxygen resolves this file's relative
+# paths (INPUT, OUTPUT_DIRECTORY, HTML_HEADER, ...) against the CURRENT
+# WORKING DIRECTORY, not the Doxyfile's location, so run it from *inside*
+# docs/, not from the repo root:
+#
+#     cd docs && doxygen Doxyfile
+#
+# Output lands in docs/_build/html/index.html (also git-ignored).
+
+PROJECT_NAME           = "Lattice"
+PROJECT_BRIEF          = "Voxel game engine -- public C++ API reference"
+OUTPUT_DIRECTORY       = _build
+
+# ---------------------------------------------------------------------------
+# Input: the public include/ surface, plus the reference plugins' shared
+# extension-API headers, plus this directory's mainpage markdown. src/ is
+# PRIVATE to the engine's own build (CMakeLists.txt) and deliberately excluded.
+# ---------------------------------------------------------------------------
+INPUT                  = ../include \
+                         ../plugins/kinematic-body/kinematic_body.h \
+                         ../plugins/mob/mob.h \
+                         ../plugins/procedural-sky/procedural_sky.h \
+                         ../plugins/keyboard-mouse/keyboard_mouse.h \
+                         ../plugins/gamepad/gamepad.h \
+                         ../plugins/range-attenuation/range_attenuation.h \
+                         ../plugins/atmospheric-mist/atmospheric_mist.h \
+                         ../plugins/example-hooks/example_hooks.h \
+                         ../plugins/asteroid-field/asteroid_field.h \
+                         api-overview.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.md
+USE_MDFILE_AS_MAINPAGE = api-overview.md
+
+# ---------------------------------------------------------------------------
+# Extraction: only documented entities, and never private members. Engine.h
+# mixes a public interface with private members referencing internal
+# forward-declared types (PluginManager*, World*, net::NetworkManager*, ...)
+# that must never leak into the generated reference.
+# ---------------------------------------------------------------------------
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+EXTRACT_LOCAL_CLASSES  = NO
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = NO
+WARN_IF_UNDOCUMENTED   = YES
+WARN_AS_ERROR          = NO
+WARN_LOGFILE           = _build/doxygen-warnings.log
+
+# ---------------------------------------------------------------------------
+# This is a flat C-ABI / struct-heavy surface, not a class hierarchy -- no
+# inheritance graphs, so graphviz is skipped entirely (avoids a CI dependency
+# and the class/include/dependency graphs' low value here).
+# ---------------------------------------------------------------------------
+HAVE_DOT               = NO
+CLASS_GRAPH            = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+DIRECTORY_GRAPH        = NO
+SORT_MEMBER_DOCS       = NO
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+
+# ---------------------------------------------------------------------------
+# HTML output + doxygen-awesome-css theme (fetched by fetch-doxygen-theme.sh,
+# not vendored -- see that script and .gitignore).
+# ---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_COLORSTYLE        = LIGHT
+HTML_HEADER            = html-header.html
+HTML_EXTRA_STYLESHEET  = doxygen-awesome/doxygen-awesome.css \
+                         doxygen-awesome/doxygen-awesome-sidebar-only.css \
+                         doxygen-awesome/doxygen-awesome-sidebar-only-darkmode-toggle.css
+HTML_EXTRA_FILES       = doxygen-awesome/doxygen-awesome-darkmode-toggle.js
+
+QUIET                  = NO
