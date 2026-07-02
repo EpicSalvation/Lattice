@@ -1125,3 +1125,9 @@ Gravity may vary **per position** (radial) and **per frame** (a moving body), so
 ### Dependency Boundaries
 
 `GravityProvider` and `axisrole` are header-only world-tier facilities with no dependencies beyond `glm` / `WorldCoord`, so both the world tier (collision) and the simulation tier (fluid) and the renderer (face roles) read them without a new edge. The gravity vector is **supplied to** the kinematic step / passed to the mesh builder by the host or demo, which owns the `GravityProvider` and queries it — the engine never installs a global gravity singleton, matching the policy stance of §15.
+
+## 19. Engine Build Identifier
+
+**Files:** `include/core/EngineId.h`, `src/core/EngineId.cpp`
+
+`core::engineId()` returns a single unsplit string constant — engine name, upstream repo URL, license notice, and the git commit the binary was built from (injected by CMake via `LATTICE_BUILD_COMMIT`) — the same sort of "about" string many libraries stamp into their binaries for build identification. It's called once from `Engine::init()` at `Log::debug` level. Debug is below the engine's default `Info` log level, so the string never appears in a shipped game's normal output — but the call still forces the compiler to keep `kEngineId` live in the binary's data segment, and keeps `EngineId.cpp` linked into the final executable rather than dropped as an unreferenced object file from the static archive. A `strings` scan or hex dump of a shipped binary recovers it regardless of build type or logging configuration, which is incidentally useful if the copyright holder ever needs to confirm a given executable was built against this engine. It does not gate, degrade, or alter engine behavior, and carries no license key or network check.
