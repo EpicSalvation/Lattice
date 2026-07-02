@@ -16,7 +16,7 @@ diffusion stability, light attenuation) you want **B**. If you are driving the e
 *live* — frame rate cap, camera, audio listener, log verbosity, or the **per-frame
 work budgets** (§C.6) — you want **C**.
 
-> **Note (M17 D3b landed).** The per-frame work budgets were promoted from compile-time
+> **Note.** The per-frame work budgets were promoted from compile-time
 > constants to a runtime struct (`EngineConfig`). They are now configured through the **Per-frame work budgets** API in §C,
 > not by rebuilding. `Tuning.h` still publishes them as named constants — now *derived*
 > from the `EngineConfig` defaults — as the documented baseline, and the §B budget rows
@@ -48,7 +48,7 @@ Each entry under `layers:` accepts:
 | `view_distance_chunks` | int ≥ 0 | `8` | no | Load/evict radius around the camera, in chunks. Also the streaming-volume radius. Raise for longer view distance at higher memory/CPU cost. |
 | `resident_chunk_budget` | int ≥ 0 | `0` (unlimited) | no | Hard cap on resident chunks for this layer; the manager evicts farthest-first clean chunks to fit (near and dirty chunks are pinned). Set it to bound memory across a deep stack. |
 | `decompose_distance_m` | double ≥ 0 | unset → single-radius fallback | no | Distance at which this layer's macro voxels decompose into their child. Setting it **per layer decouples the cascade**: reveal a coarse silhouette far out yet build the fine, expensive grid only up close (e.g. a 4 m silhouette at 280 m, the 1 m grid only within 90 m). |
-| `streaming_volume.shape` | `box` \| `sphere` \| `shell` | `box` | no | Shape of the residency volume. `box` = isotropic cube (reproduces pre-M16 behavior); `sphere` = Euclidean ball; `shell` = thin band resident only at range (distant backdrops). Use non-box for deep-descent, flying, or space worlds with no vertical bias. |
+| `streaming_volume.shape` | `box` \| `sphere` \| `shell` | `box` | no | Shape of the residency volume. `box` = isotropic cube (the original single-shape behavior); `sphere` = Euclidean ball; `shell` = thin band resident only at range (distant backdrops). Use non-box for deep-descent, flying, or space worlds with no vertical bias. |
 | `streaming_volume.shell_thickness_chunks` | int ≥ 1 | `1` | shell only | Band width of a `shell` volume; inner radius = `view_distance_chunks − this`. |
 
 ### Stack-wide validation rules
@@ -65,7 +65,7 @@ Enforced across the whole stack at load:
   must be ≥ the child layer's chunk world size (`child voxel_size_m × child
   chunk_size_voxels`), so one parent macro fills whole child chunks without overlap.
   Violations throw; fix by lowering the child's `chunk_size_voxels` or raising the
-  parent's `voxel_size_m`. (See `m17-g1-multi-level-propagation` for the deep-stack
+  parent's `voxel_size_m`. (See `docs/m17-architecture-gap-audit.md` (finding G1) for the deep-stack
   constraint this enforces.)
 
 ### Example
@@ -141,7 +141,7 @@ These are `DecompositionManager::tick`'s default arguments; a caller may pass it
 |----------|---------|---------|
 | `kHysteresisChunks` | `2` | Margin (chunks) between a layer's load radius and its (larger) eviction radius, so a camera on the boundary doesn't thrash chunks in/out. Raise to reduce reload churn at the edge. |
 
-### `tuning::physics` — structural support model (M13)
+### `tuning::physics` — structural support model
 
 | Constant | Default | Meaning |
 |----------|---------|---------|
@@ -153,7 +153,7 @@ These are `DecompositionManager::tick`'s default arguments; a caller may pass it
 | `kMaxStructuralEventsPerFrame` | `256` | Per-frame cap on structural events fired (budget). |
 | `kMaxSupportFloodNodes` | `4096` | Per-event cap on support-flood connectivity nodes. |
 
-### `tuning::thermal` — heat diffusion (M14)
+### `tuning::thermal` — heat diffusion
 
 | Constant | Default | Meaning |
 |----------|---------|---------|
@@ -161,7 +161,7 @@ These are `DecompositionManager::tick`'s default arguments; a caller may pass it
 | `kStabilityFactor` | `1/6` | Explicit-scheme 3D stability bound; drives sub-step count. Lowering is safer/slower, raising risks oscillation. |
 | `kMaxThermalCellsPerFrame` | `4096` | Per-frame cap on diffusion cells visited (budget). |
 
-### `tuning::fluid` — cellular-automaton flow (M14)
+### `tuning::fluid` — cellular-automaton flow
 
 | Constant | Default | Meaning |
 |----------|---------|---------|
@@ -170,7 +170,7 @@ These are `DecompositionManager::tick`'s default arguments; a caller may pass it
 | `kMaxFluidCellsPerFrame` | `4096` | Per-frame cap on flow cells visited (budget). |
 | `kMaxFluidEventsPerFrame` | `256` | Per-frame cap on fluid events fired (budget). |
 
-### `tuning::lighting` — sky + block light (M17)
+### `tuning::lighting` — sky + block light
 
 | Constant | Default | Meaning |
 |----------|---------|---------|
@@ -180,7 +180,7 @@ These are `DecompositionManager::tick`'s default arguments; a caller may pass it
 | `kMaxLightingCellsPerFrame` | `8192` | Per-frame cap on lighting cells visited (budget). |
 | `kMaxLightingEventsPerFrame` | `256` | Per-frame cap on lighting events fired (budget). |
 
-### `tuning::ao` — ambient occlusion (M17)
+### `tuning::ao` — ambient occlusion
 
 | Constant | Default | Meaning |
 |----------|---------|---------|
@@ -200,7 +200,7 @@ or per frame.
 | `setTargetFrameRate(int fps)` / `getTargetFrameRate()` | `60` | Cap the game-loop frame rate; the loop sleeps to hold it. |
 | `getMetrics() → EngineMetrics` | — | Per-frame snapshot: `frameTimeSec`, `drawCalls`, `voiceCount`, `decompInFlight`, and per-layer resident-chunk / decomposed-macro counts. Replaces ad-hoc per-demo HUD recomputation; drives HUDs and profiling. |
 | `setNetworkManager` / `setAudioManager` / `setFluidSystem` / `setThermalSystem` / `setLightingSystem` / `setRenderer` / `setDecompositionManager` | all `nullptr` | Attach optional subsystems; null disables that subsystem (single-player demos leave most null). Field-system setters also enable the read-only queries below. |
-| `temperatureAt` / `fluidAmountAt` / `lightAt(WorldCoord)` | ambient default when unattached | Read-only sampling of the M14/M17 field overlays; returns the absent-cell default when no system is attached. |
+| `temperatureAt` / `fluidAmountAt` / `lightAt(WorldCoord)` | ambient default when unattached | Read-only sampling of the fluid/thermal/lighting field overlays; returns the absent-cell default when no system is attached. |
 
 ### Logging (`src/core/Logger.h`, `namespace Log`)
 
@@ -236,11 +236,11 @@ listener; `playSound(id, pos, overrides)` for one-shots; `createEmitter` /
 | `setViewport(width, height)` | On window resize. |
 | `setCameraPosition(WorldCoord)` | Each frame to move the view. |
 | `setCameraRotation(pitch, yaw, roll)` | Each frame to aim the view. |
-| `setCameraUp(vec3 worldUp)` | Each frame on a many-bodied/off-axis world to align the horizon to a surface normal (pass `-gravityDir`). Default `(0,1,0)` is the historical Y-up view, byte-identical (M17). |
+| `setCameraUp(vec3 worldUp)` | Each frame on a many-bodied/off-axis world to align the horizon to a surface normal (pass `-gravityDir`). Default `(0,1,0)` is the historical Y-up view, byte-identical. |
 | `setFarClip(metres)` | Once (or when view distance changes); default 1000 m. Raise for multi-layer worlds whose coarsest layer spans kilometres. |
-| `setFog(FogParams)` | Each frame to drive distance-obscurance fog — color + near/far band + density — hiding the LOD pop and chunk-load edge (M17). Default `density 0` disables fog (byte-identical). Typically fed from a supplier plugin (`atmospheric-mist`, `range-attenuation`); see `include/renderer/Fog.h`. |
-| `setClearColor(vec3)` | Once (or when the fog color changes) to set the background color. Pair it with the fog color so far geometry dissolves into the background with no far-plane halo (M17). Default `0x303030` is byte-identical. |
-| `setSky(SkyParams)` | Each frame to paint a procedural sky behind the scene — a zenith/horizon/ground gradient measured against the camera up — instead of the flat clear color (M17; groundwork for the M19 space demo). Default `enabled == false` draws no sky (byte-identical). Typically fed from the `procedural-sky` supplier plugin (day / dusk / space presets + day/night cycle); see `include/renderer/Sky.h` and `docs/m17-skybox-evaluation.md`. |
+| `setFog(FogParams)` | Each frame to drive distance-obscurance fog — color + near/far band + density — hiding the LOD pop and chunk-load edge. Default `density 0` disables fog (byte-identical). Typically fed from a supplier plugin (`atmospheric-mist`, `range-attenuation`); see `include/renderer/Fog.h`. |
+| `setClearColor(vec3)` | Once (or when the fog color changes) to set the background color. Pair it with the fog color so far geometry dissolves into the background with no far-plane halo. Default `0x303030` is byte-identical. |
+| `setSky(SkyParams)` | Each frame to paint a procedural sky behind the scene — a zenith/horizon/ground gradient measured against the camera up — instead of the flat clear color (groundwork for a future space demo). Default `enabled == false` draws no sky (byte-identical). Typically fed from the `procedural-sky` supplier plugin (day / dusk / space presets + day/night cycle); see `include/renderer/Sky.h` and `docs/m17-skybox-evaluation.md`. |
 
 ### Networking (`src/net/NetworkManager.h`)
 
@@ -254,11 +254,11 @@ listener; `playSound(id, pos, overrides)` for one-shots; `createEmitter` /
 ### Per-frame work budgets (`include/core/EngineConfig.h` `engineConfig()`)
 
 The per-frame work caps from §B (plus the streaming hysteresis margin), promoted to a
-runtime struct (M17 D3b) so a game can expose quality sliders and a developer can retune
+runtime struct so a game can expose quality sliders and a developer can retune
 without a rebuild. Read by each subsystem's tick (or `LODManager` call) from the
 process-global `engineConfig()`; mutate before or between ticks. Every field defaults to
 its §B `Tuning.h` value, so an engine that never touches it is byte-identical to the
-pre-D3b build. `resetEngineConfig()` restores all defaults. There is no per-subsystem
+original compile-time-only build. `resetEngineConfig()` restores all defaults. There is no per-subsystem
 alias for these values — `engineConfig()` is the single place they are read and set.
 
 ```cpp
