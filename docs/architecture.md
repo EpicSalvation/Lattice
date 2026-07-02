@@ -1125,3 +1125,11 @@ Gravity may vary **per position** (radial) and **per frame** (a moving body), so
 ### Dependency Boundaries
 
 `GravityProvider` and `axisrole` are header-only world-tier facilities with no dependencies beyond `glm` / `WorldCoord`, so both the world tier (collision) and the simulation tier (fluid) and the renderer (face roles) read them without a new edge. The gravity vector is **supplied to** the kinematic step / passed to the mesh builder by the host or demo, which owns the `GravityProvider` and queries it — the engine never installs a global gravity singleton, matching the policy stance of §15.
+
+## 19. Build Provenance Fingerprint
+
+**Files:** `include/core/EngineFingerprint.h`, `src/core/EngineFingerprint.cpp`
+
+The engine is MIT-licensed: anyone may build closed-source, unattributed games with it. The license's one obligation — preserving the copyright notice — is trivial for a shipped binary to drop, so there's no technical way to *require* attribution. What's feasible is **provenance evidence**: a way for the copyright holder to positively identify, after the fact, that a given shipped executable was built against this engine.
+
+`core::engineFingerprint()` returns a single unsplit string constant (engine name, upstream repo URL, MIT notice, and the git commit the binary was built from, injected by CMake via `LATTICE_BUILD_COMMIT`) and is called once from `Engine::init()` at `Log::debug` level. Debug is below the engine's default `Info` log level, so the string never appears in a shipped game's normal output — but the call still forces the compiler to keep `kFingerprint` live in the binary's data segment, and keeps `EngineFingerprint.cpp` linked into the final executable rather than dropped as an unreferenced object file from the static archive. A `strings` scan or hex dump of a shipped binary recovers it regardless of build type or logging configuration. This is provenance only: it does not gate, degrade, or alter engine behavior, and carries no license key or network check.

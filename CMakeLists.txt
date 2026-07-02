@@ -161,6 +161,26 @@ else()
   FetchContent_MakeAvailable(googletest)
 endif()
 
+# Build-commit fingerprint (docs/architecture.md §19). Captured once here at
+# configure time, rather than as a target-wide compile definition, so that
+# only src/core/EngineFingerprint.cpp recompiles when HEAD moves — the rest of
+# the engine's translation units stay untouched.
+find_package(Git QUIET)
+set(LATTICE_BUILD_COMMIT "unknown")
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} rev-parse --short=12 HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE LATTICE_BUILD_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE _lattice_git_rc
+  )
+  if(NOT _lattice_git_rc EQUAL 0 OR LATTICE_BUILD_COMMIT STREQUAL "")
+    set(LATTICE_BUILD_COMMIT "unknown")
+  endif()
+endif()
+
 # ─── Engine library ──────────────────────────────────────────────────
 # The engine is a library; games and demos are separate executables that
 # link it (see demos/ below). Builds static by default; pass
@@ -180,6 +200,9 @@ file(GLOB_RECURSE ENGINE_SOURCES
 )
 
 add_library(voxel-engine ${ENGINE_SOURCES})
+
+set_source_files_properties(src/core/EngineFingerprint.cpp PROPERTIES
+  COMPILE_DEFINITIONS "LATTICE_BUILD_COMMIT=\"${LATTICE_BUILD_COMMIT}\"")
 
 # include/ is the public API and propagates to consumers; src/ holds engine
 # internals and is private to the library's own compilation. The committed
