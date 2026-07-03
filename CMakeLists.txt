@@ -528,6 +528,19 @@ foreach(_demo ${_voxel_demo_dirs})
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/gamepad
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/mob)
     endif()
+    # The Voxel World demo (demos/21) COMPILES IN its worldgen plugin (voxel-world)
+    # rather than loading it from disk, so it can call the plugin's custom entry
+    # points directly — voxelworld_biome_name() for the HUD and voxelworld_set_seed_ptr()
+    # for the seed. VOXELWORLD_COMPILED_IN drops the plugin's generic voxel_plugin_init
+    # wrapper; VOXEL_PLUGIN_NO_ABI_STAMP drops its (here-unused) ABI stamp. The water
+    # plugin still loads from disk via VOXEL_WATER_PLUGIN_PATH. (voxel-world is ALSO
+    # built as a disk MODULE for consistency with the other worldgen plugins.)
+    if(_demo STREQUAL "21-voxel-world")
+      target_sources(${_demo} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/plugins/voxel-world/plugin.cpp)
+      target_compile_definitions(${_demo} PRIVATE
+        VOXELWORLD_COMPILED_IN VOXEL_PLUGIN_NO_ABI_STAMP)
+    endif()
     # Inject the assets directory path for demos that bundle asset files.
     set(_demo_assets ${_demo_dir}/assets)
     if(EXISTS ${_demo_assets})
@@ -604,10 +617,13 @@ if(TEST_SOURCES)
   # to verify the seed → world determinism guarantee on the real generators.
   set(_ow_plugin_src    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/overworld/plugin.cpp)
   set(_tr_plugin_src    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/trees/plugin.cpp)
+  # VoxelWorldDeterminismTest.cpp wires in the demos/21 six-biome worldgen plugin
+  # to verify its seed -> world determinism and that all six biomes are reachable.
+  set(_vw_plugin_src    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/voxel-world/plugin.cpp)
   add_executable(voxel-engine-tests ${TEST_SOURCES}
     ${_kb_plugin_src} ${_km_plugin_src} ${_gp_plugin_src} ${_eh_plugin_src}
     ${_mist_plugin_src} ${_ra_plugin_src} ${_sky_plugin_src}
-    ${_ow_plugin_src} ${_tr_plugin_src})
+    ${_ow_plugin_src} ${_tr_plugin_src} ${_vw_plugin_src})
   # The compiled-in plugins are wired in (wireInPlugin) and never ABI-checked, so
   # drop their stamps target-wide — several stamps of the one exported symbol would
   # collide at link. The disk-loaded fixture plugins (test-plugin-*) are separate
@@ -636,7 +652,7 @@ if(TEST_SOURCES)
   # export. Each plugin source only checks its own macro, so a target-wide define is
   # safe here.
   target_compile_definitions(voxel-engine-tests PRIVATE
-    OVERWORLD_COMPILED_IN TREES_COMPILED_IN)
+    OVERWORLD_COMPILED_IN TREES_COMPILED_IN VOXELWORLD_COMPILED_IN)
   target_link_libraries(voxel-engine-tests PRIVATE voxel-engine gtest gtest_main)
   target_include_directories(voxel-engine-tests PRIVATE src)
   # AsteroidFieldTest.cpp checks the body lattice the asteroid-field plugin and

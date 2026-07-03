@@ -308,8 +308,10 @@ voxel-game-engine
 │   ├── 17-asteroid-belt-miner/            # radial gravity, volumetric asteroids, surface-cam
 │   ├── 18-hud-and-controls/               # health/inventory/minimap HUD, gamepad support
 │   ├── 19-multilevel-collapse/            # multi-level propagation, grandparent cascade
-│   └── 20-mega-demo/                      # "Overworld" survival slice — seeded terrain,
-│       └── main.cpp                       #   caves, trees, water, zombies, textured blocks, audio
+│   ├── 20-mega-demo/                      # "Overworld" survival slice — seeded terrain,
+│   │   └── main.cpp                       #   caves, trees, water, zombies, textured blocks, audio
+│   └── 21-voxel-world/                    # six-biome infinite/bounded world, two-speed flight
+│       └── main.cpp                       #   (seeded worldgen, streaming, invisible world border)
 ├── plugins                                # Runtime-loadable plugins, each a MODULE shared lib
 │   ├── base-terrain/                      # Materials + terrain layer generator (the streaming-terrain world)
 │   ├── water/                             # Removable: water material + sea-level feature generator
@@ -339,6 +341,7 @@ voxel-game-engine
 │   ├── hazards/                           # lava hazard pools (removable)
 │   ├── drill-world/                       # 4-layer cascade generator
 │   ├── overworld/                         # seeded rolling terrain + caves + ore
+│   ├── voxel-world/                       # six-biome worldgen (climate fields + biome decoration)
 │   ├── trees/                             # tree placement feature generator
 │   └── mob/                               # wander/chase/attack zombie AI
 ├── tests                                  # Unit tests; link voxel-engine + GoogleTest (~500 tests)
@@ -617,6 +620,18 @@ cmake --build build
 #                  ./build/20-mega-demo 12345     # choose a world seed
 # Multi-config:    ./build/Debug/20-mega-demo.exe 12345
 
+# Run VOXEL WORLD: a Minecraft-style fly-through explorer over six biomes (Ocean,
+# Plains, Forest, Desert, Mountains, Snowy Tundra) generated deterministically from a
+# world seed. Infinite by default — fly any direction (hold Left-Ctrl for the fast
+# traversal speed) and it streams forever with no edge. Pass --size N to cap it to a
+# square half-extent of N metres, an invisible "world border" you cannot fly past. The
+# HUD reads the seed, infinite/bounded, the biome under the camera, and your position.
+# (Synthesises its texture assets on first run, like the mega-demo.)
+# Single-config:   ./build/21-voxel-world               # infinite, default seed
+#                  ./build/21-voxel-world 12345         # choose a world seed
+#                  ./build/21-voxel-world 12345 --size 800   # bounded world border
+# Multi-config:    ./build/Debug/21-voxel-world.exe 12345 --size 800
+
 # Run the test suite
 ctest --test-dir build
 ```
@@ -729,6 +744,20 @@ material, your coordinates, the live mob count (and how many are hostile), and t
 input device. Zombies wander until they sense you, then chase and bite (draining the
 health bar); mine into the spring/valley water to watch it flow, and chop trees for wood.
 
+Controls for `21-voxel-world`: **WASD** move, **mouse** look, **Space/Shift** fly
+up/down, **hold Left-Ctrl** to fly at the fast traversal speed, **F** toggles the
+mouse cursor, **ESC** quits. This is a fly-only explorer (no mining/combat) across
+**six biomes** — Ocean, Plains, Forest, Desert, Mountains, and Snowy Tundra —
+generated deterministically from the world seed. **Choosing a world:** pass a seed as
+the first launch argument — `21-voxel-world 12345` (multi-config:
+`./build/Debug/21-voxel-world.exe 12345`) — and omit it for a deterministic default;
+the same seed regenerates the same world. By default the world is **infinite**: fly in
+any direction (Left-Ctrl to cover ground fast) and it streams forever with no edge.
+Pass **`--size N`** to cap it to a square of half-extent `N` metres — a classic
+"world border" you cannot fly past (`21-voxel-world 12345 --size 800`). The HUD status
+line reads the active **seed**, whether the world is **infinite** or **bounded**, the
+**biome** under the camera, your coordinates, and the current flight speed (cruise/FAST).
+
 ---
 
 ## Getting Started
@@ -792,7 +821,7 @@ tracked below.
 
 - [x] Verify docs are all correct — *shipped: full pass over README, ARCHITECTURE, and the tutorial series correcting stale references (project structure, plugin API surface, textured-block interop); the structural-collapse feature's docs (ARCHITECTURE §7, Tutorial 13, `crumble`/`falling-debris` plugin headers) were additionally marked experimental and likely to change, per its known streamed-surface failure mode.*
 - [x] Make sure the engine has a name.
-- [ ] **Demo — Voxel World (Minecraft-style infinite survival):** Another large demo in the spirit of the Mega-Demo, deliberately emulating a classic Minecraft-like world — no mobs/AI this time (that's the Mega-Demo's job). Roughly **six biomes** (one of them ocean) generated deterministically from a user-supplied world seed, with a sane default seed when none is given (the Mega-Demo's seed pattern). Unlike a vanilla Minecraft world, this one is **not bounded** by default: with no size arguments it streams infinitely in all four cardinal (horizontal) directions exactly like the engine's other decomposed worlds, generating forever as the player explores. Optional runtime arguments can instead cap the world to a finite size, so a bounded "classic world border" can be demonstrated too. The player can **fly** at a normal exploration speed and at a much faster traversal speed, so a session can cover the distance of a typical (bounded) Minecraft world in a reasonable amount of time and then keep going to show the world has no edge.
+- [x] **Demo — Voxel World (Minecraft-style infinite survival):** Another large demo in the spirit of the Mega-Demo, deliberately emulating a classic Minecraft-like world — no mobs/AI this time (that's the Mega-Demo's job). Roughly **six biomes** (one of them ocean) generated deterministically from a user-supplied world seed, with a sane default seed when none is given (the Mega-Demo's seed pattern). Unlike a vanilla Minecraft world, this one is **not bounded** by default: with no size arguments it streams infinitely in all four cardinal (horizontal) directions exactly like the engine's other decomposed worlds, generating forever as the player explores. Optional runtime arguments can instead cap the world to a finite size, so a bounded "classic world border" can be demonstrated too. The player can **fly** at a normal exploration speed and at a much faster traversal speed, so a session can cover the distance of a typical (bounded) Minecraft world in a reasonable amount of time and then keep going to show the world has no edge. — *shipped: `demos/21-voxel-world` on a single terminal `terrain` layer, driven by a new `voxel-world` worldgen plugin that selects six biomes (Ocean, Plains, Forest, Desert, Mountains, Snowy Tundra) from low-frequency climate fields — terrain **height** is a continuous blend of those fields so chunk borders never seam, while biome **identity** is a hard quantization used only for surface material and biome-gated decoration (trees, spruce, cacti). Ocean reuses the `water` plugin's flat sea fill. Infinite by default via `LODManager` streaming; `--size N` caps it to a square half-extent with an invisible clamped border. Two-speed free-cam flight (hold Left-Ctrl to boost). Determinism and full six-biome coverage are covered by `tests/VoxelWorldDeterminismTest.cpp`.*
 - [ ] **Demo — "No Man's Voxel" (multi-world flight):** A follow-on riffing on No Man's Sky, built on the Voxel World demo above. The player starts on a "paradise world" — essentially the previous demo's world — but can fly up and out past its local bounds to reach and land on other nearby worlds in the same session, no loading-screen jump. Each additional world is simpler than the paradise world (one or two biomes apiece). Depends on the skybox evaluation (`docs/m17-skybox-evaluation.md`).
 - [x] **API reference documentation:** The tutorials teach the engine by walking through demos, but there is no standalone reference for the plugin API surface (`plugin_api.h` types/functions, hook signatures, `World`/`WorldCoord` interfaces, subsystem `api()` entry points). Generate or hand-write a proper API reference (e.g. Doxygen over the public headers, or a structured Markdown reference under `docs/`) so engine consumers can look up a symbol's contract without reverse-engineering it from a tutorial or demo. — *shipped: Doxygen over `include/` plus each reference plugin's extension-API header (doxygen-awesome-css theme), deployed via GitHub Actions to GitHub Pages at [epicsalvation.github.io/Lattice](https://epicsalvation.github.io/Lattice/), alongside a small landing page linking the API reference, tutorials, demos, and plugins.*
 - [ ] 1.0 tag
