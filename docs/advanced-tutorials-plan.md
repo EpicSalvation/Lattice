@@ -18,6 +18,24 @@ tutorial follows the same three-beat shape:
    knowing your content, so it is your call).
 3. **The pattern** — the concrete technique, anchored to runnable code.
 
+### Labelling (decided)
+
+The advanced tier keeps the single continuous numbering (15, 16, 17 …) — there
+is no separate `advanced/` directory or renumbering — but is **explicitly
+marked "Advanced" everywhere it is surfaced** so a newcomer knows these assume
+the 01–14 grounding:
+
+- **In each tutorial file:** the H1 title carries the label, e.g.
+  `# Tutorial 16 — Wrapping (Toroidal) Worlds *(Advanced)*`, and the opening
+  preamble states it is an advanced tutorial and names the prerequisite
+  concepts (a plugin, a layer config, the streaming loop).
+- **In the listings:** wherever the series is enumerated —
+  `README.md` (the project-structure tree comment and the "Getting Started →
+  Learn the engine concept by concept" bullet) and the "Tutorials" card in
+  `docs/site/index.html` — 15–17 are grouped or tagged as an **"Advanced"**
+  block, distinct from the 01–14 progression. (There is no standalone
+  `docs/tutorials/` index today; if one is added, it carries the same split.)
+
 > **Grounding note.** Tutorials 15 and 16 are write-ups of capabilities that
 > already ship in `demos/21-voxel-world` (the `--size`, `--wrap`, and teleport
 > features and the reusable `demos/common/WorldWrap.h`). They document a
@@ -31,11 +49,13 @@ tutorial follows the same three-beat shape:
 
 ## Tutorial index
 
-| #  | File | Title |
-|----|------|-------|
-| 15 | `15-large-worlds-and-coordinate-space.md` | Large Worlds and Coordinate Space |
-| 16 | `16-wrapping-worlds.md` | Wrapping (Toroidal) Worlds |
-| 17 | `17-seamless-procedural-generation.md` | Seamless Procedural Generation |
+All three are the **Advanced** tier (see Labelling above).
+
+| #  | File | Title | Tier |
+|----|------|-------|------|
+| 15 | `15-large-worlds-and-coordinate-space.md` | Large Worlds and Coordinate Space | Advanced |
+| 16 | `16-wrapping-worlds.md` | Wrapping (Toroidal) Worlds | Advanced |
+| 17 | `17-seamless-procedural-generation.md` | Seamless Procedural Generation | Advanced |
 
 These three form one arc — **"Big, Believable Worlds"** — and read best in
 order: 15 establishes how far a world can honestly go and how coordinates stay
@@ -140,6 +160,10 @@ understands why the coordinate wrap and the seam blend are separate jobs.
 **Audience:** Developer writing worldgen that must not show boundaries — chunk
 edges, decomposition boundaries, or a wrap seam.
 
+**Scope (decided):** intentionally the broadest of the three — an advanced
+tutorial can carry a larger scope, so all three seam-matching techniques stay
+in one tutorial rather than splitting into separate files.
+
 **Covers:**
 
 - **The concern.** Naïve generation shows seams: adjacent chunks that sample
@@ -180,12 +204,29 @@ fields, lattice value noise), `src/world/Noise.h`, `include/plugin_api.h`
 
 ---
 
-## Open questions for review
+## Resolved decisions
 
-1. **Numbering.** Continue as 15–17 (chosen here), or mark an explicit
-   "Advanced" break in the index of the main series README?
-2. **Scope of 17.** The three noise techniques could each be a short tutorial;
-   folded into one here to keep the arc at three. Split if it runs long.
-3. **A fourth?** Streaming budgets / LOD tuning at world scale overlaps
-   tutorial 14 (Performance Tuning) — reference from 15 rather than add a 18,
-   unless there is appetite for a dedicated large-scale-streaming tutorial.
+1. **Numbering & labelling.** Keep the continuous numbering (15–17); mark the
+   tier "Advanced" in each tutorial's title + preamble and in every listing.
+   See *Labelling* above.
+2. **Scope of 17.** Stays broad — all three seam-matching techniques in one
+   tutorial. A larger scope is acceptable for an advanced tutorial.
+
+## Deferred — potential future tutorials
+
+These are flagged now but intentionally **not planned in detail until the M19
+"No Man's Voxel" demo lands**, since that demo — where the player flies up and
+out of a world's local bounds into open space between worlds — will inform
+whether they are needed and what they should say.
+
+- **18 — Streaming at world scale.** Streaming budgets / LOD tuning for very
+  large worlds. Overlaps tutorial 14 (Performance Tuning); may end up a
+  cross-reference from 14/15 rather than a standalone tutorial. M19's
+  fly-up-and-out traversal is a stress case that will show whether it warrants
+  its own tutorial.
+- **19 — Multiple worlds in one game.** The mechanic for more than one world in
+  a single game — leaving one world for another, levels, or world-switching —
+  whatever pattern M19 establishes for the space *between* worlds. Cannot be
+  written responsibly before that demo defines the approach.
+
+Revisit this section once M19 ships.
