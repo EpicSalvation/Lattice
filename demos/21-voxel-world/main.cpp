@@ -12,12 +12,28 @@
 // distance of a bounded Minecraft world and then flying on to prove there's no edge.
 //
 // Choosing a world: pass a seed as the first argument — `21-voxel-world 12345` —
-// and omit it for a deterministic default. Pass `--size N` to cap the world to a
-// square of half-extent N metres (an invisible border you cannot fly past); omit
-// it for an infinite world.
+// and omit it for a deterministic default. World topology is one of three:
+//   (default)  infinite — streams forever in all four horizontal directions.
+//   --size N   bounded  — an invisible hard border at half-extent N metres.
+//   --wrap N   wrapping — a torus of half-extent N: fly past one edge and you
+//              reappear at the opposite one, like the surface of a planet. The
+//              seam is made continuous by a transitional swath of terrain blended
+//              toward the wrapped-around side (see WorldWrap.h and the voxel-world
+//              plugin's fbm2 seam blend), so there is no cliff where you cross. N
+//              snaps up to a whole, even number of chunks (min the streaming
+//              diameter). Reusable via demos/common/WorldWrap.h (the planned M19
+//              "No Man's Voxel" demo shares this topology).
 //
 // Controls: WASD move, mouse look, Space/Shift fly up/down, hold Left-Ctrl to fly
-// FAST, F toggles the mouse cursor, ESC quits.
+// FAST, F toggles the mouse cursor, ESC quits. Number keys 1..6 teleport along +X
+// to escalating distances (5 = the classic 30,000,000 m Minecraft border, 6 = the
+// engine's real edge) so you need not fly the whole way.
+//
+// On the "infinite" world's limits: a world position is a double (WorldCoord), which
+// is precise to ~7 nm even at the Minecraft border, so the double never runs out of
+// resolution anywhere a player would go. The real edge is ChunkCoord being int32: a
+// chunk index would overflow it around 6.9e10 m out, so horizontal position is
+// clamped safely short of that at kEngineLimitM (1000x the Minecraft border).
 
 #include "core/Engine.h"
 #include "core/LayerConfig.h"
@@ -32,6 +48,8 @@
 #include "world/ChunkCoordMath.h"
 #include "world/World.h"
 
+#include "../common/WorldWrap.h"
+
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 
@@ -44,6 +62,7 @@
 #include <fstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifndef VOXEL_WATER_PLUGIN_PATH
@@ -57,6 +76,7 @@
 // (it only needs its feature generator, resolved through the hook table).
 extern "C" int         voxelworld_plugin_init(PluginContext* ctx);
 extern "C" void        voxelworld_set_seed_ptr(uint64_t* ptr);
+extern "C" void        voxelworld_set_wrap(double period_m, double band_m);
 extern "C" const char* voxelworld_biome_name(double wx, double wz);
 
 namespace {
@@ -69,6 +89,20 @@ constexpr uint64_t kDefaultSeed    = 0xA11CE5EEDull;  // the mega-demo's seed pa
 // Terrain heights span ~7 (seabed) .. ~80 (peaks); a 3-band box (chunk 32) covers
 // the whole vertical range without streaming empty sky or deep void.
 constexpr int      kMaxChunkYBand  = 2;
+constexpr double   kMcBorderM      = 30000000.0;  // Minecraft's classic world border
+
+// The world streams "infinitely," but a chunk index is int32 (ChunkCoord, and a
+// chunk is 32 m here), so the true edge is where that index would overflow int32
+// — roughly 6.9e10 m out. We clamp horizontal position well inside that, at 1000x
+// the Minecraft border. That is also far past where double precision could ever
+// matter: the ULP of a double at this range is only a few micrometres, versus the
+// ~7 nanometres it already is at the Minecraft border.
+constexpr double   kEngineLimitM   = 3.0e10;
+
+// Teleport presets (metres along +X) reachable with number keys 1..6, so you can
+// jump to the Minecraft border — or the engine's real edge — without the long fly.
+constexpr double   kTeleportPresetsM[] = {
+    0.0, 1000.0, 100000.0, 1000000.0, kMcBorderM, kEngineLimitM};
 
 // ───────────────────────── Texture synthesis (PNG) ──────────────────────────
 // A self-contained 16px-tile PNG writer, mirrored from the mega-demo so the demo
@@ -171,15 +205,25 @@ void ensureTextures(const std::string& dir) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // ── Arguments: [seed] [--size N] ────────────────────────────────────────────
-    uint64_t worldSeed = kDefaultSeed;
-    bool     bounded   = false;
-    double   halfSizeM = 0.0;   // half-extent in metres when bounded
+    // ── Arguments: [seed] [--size N | --wrap N] ─────────────────────────────────
+    // --size caps the world with an invisible hard border; --wrap makes it a torus
+    // of half-extent N that loops seamlessly. They are mutually exclusive world
+    // topologies — the last one on the command line wins.
+    uint64_t worldSeed   = kDefaultSeed;
+    bool     bounded     = false;
+    bool     wrapping    = false;
+    double   halfSizeM   = 0.0;   // half-extent in metres when bounded
+    double   wrapHalfReqM = 0.0;  // requested wrap half-extent (snapped to whole chunks below)
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--size" && i + 1 < argc) {
             halfSizeM = std::strtod(argv[++i], nullptr);
             bounded = halfSizeM > 0.0;
+            if (bounded) wrapping = false;
+        } else if (arg == "--wrap" && i + 1 < argc) {
+            wrapHalfReqM = std::strtod(argv[++i], nullptr);
+            wrapping = wrapHalfReqM > 0.0;
+            if (wrapping) bounded = false;
         } else if (arg == "--seed" && i + 1 < argc) {
             worldSeed = std::strtoull(argv[++i], nullptr, 0);
         } else if (!arg.empty() && arg[0] != '-') {
@@ -190,8 +234,9 @@ int main(int argc, char** argv) {
         }
     }
     Log::info(kLogCat, (std::string("World seed: ") + std::to_string(worldSeed) +
-                        (bounded ? "  (bounded to +/-" + std::to_string((long long)halfSizeM) + " m)"
-                                 : "  (infinite)")).c_str());
+                        (bounded  ? "  (bounded to +/-" + std::to_string((long long)halfSizeM) + " m)"
+                       : wrapping ? "  (wrapping)"
+                                  : "  (infinite)")).c_str());
 
 #ifdef VOXEL_REPO_ROOT
     if (!std::filesystem::exists("assets")) {
@@ -271,14 +316,47 @@ layers:
     LODManager lod(layerConfig);
     lod.setVerticalBand(0, kMaxChunkYBand);
 
-    const int    chunkSize = terrainLayer->chunkSizeVoxels();
-    const double voxelSize = terrainLayer->voxelSizeM();
-    // Bounds in chunk coordinates (a chunk is kept only if fully-or-partly inside).
+    const int    chunkSize       = terrainLayer->chunkSizeVoxels();
+    const double voxelSize       = terrainLayer->voxelSizeM();
+    const double chunkWorldSizeM = voxelSize * chunkSize;
+
+    // ── World topology ──────────────────────────────────────────────────────────
+    // --size: an invisible hard border, kept in chunk coordinates (a chunk is kept
+    // if fully-or-partly inside).
     const int halfChunks = bounded
-        ? static_cast<int>(std::floor(halfSizeM / (voxelSize * chunkSize)))
+        ? static_cast<int>(std::floor(halfSizeM / chunkWorldSizeM))
         : 0;
     auto inBounds = [&](const ChunkCoord& c) {
         return !bounded || (std::abs(c.x) <= halfChunks && std::abs(c.z) <= halfChunks);
+    };
+
+    // --wrap: a torus whose period is a whole EVEN number of chunks, so the two
+    // sides of a seam reuse identical chunk data and the domain is origin-centred.
+    // The period is snapped up to at least the streaming diameter so no chunk ever
+    // needs to appear on both sides of the camera at once. The metric period plus a
+    // transitional blend band go to the worldgen (voxelworld_set_wrap) so terrain is
+    // continuous across the seam.
+    worldwrap::Torus torus;
+    if (wrapping) {
+        const int viewDist     = layerConfig.findLayer("terrain")->view_distance_chunks;
+        const int minPeriod    = 2 * viewDist + 2;
+        int periodChunks = static_cast<int>(std::llround(2.0 * wrapHalfReqM / chunkWorldSizeM));
+        periodChunks = std::max(periodChunks, minPeriod);
+        periodChunks += (periodChunks & 1);                 // force even
+        torus = worldwrap::Torus{periodChunks, chunkWorldSizeM};
+        const double bandM = std::max(chunkWorldSizeM, torus.periodM() * 0.06);
+        voxelworld_set_wrap(torus.periodM(), bandM);
+        Log::info(kLogCat, (std::string("Wrapping world: period ") +
+                            std::to_string((long long)torus.periodM()) + " m (" +
+                            std::to_string(periodChunks) + " chunks), seam band " +
+                            std::to_string((long long)bandM) + " m.").c_str());
+    }
+
+    // Fold a chunk coord onto the torus (identity unless wrapping) — the canonical
+    // key under which the chunk's data is stored and generated.
+    auto wrapCC = [&](ChunkCoord c) -> ChunkCoord {
+        if (torus.enabled()) { c.x = torus.wrapChunk(c.x); c.z = torus.wrapChunk(c.z); }
+        return c;
     };
 
     // Feature overlays applied after the base generator fills a chunk.
@@ -299,23 +377,32 @@ layers:
         return true;
     };
 
-    // ── Camera: start above the surface at the origin ───────────────────────────
-    float pitch = -0.35f, yaw = 0.0f;
-    WorldCoord camPos(0.5, 80.0, 0.5);
-    {
-        ChunkCoord c0 = chunkmath::worldToChunk(camPos, voxelSize, chunkSize);
-        for (const ChunkCoord& c : lod.desiredChunks(c0, "terrain")) loadChunk(c);
+    // Place the camera above the surface at (x, z): loads the destination chunks
+    // synchronously so the vertical surface probe sees real terrain, then returns a
+    // spawn point a few metres above the highest solid voxel. Used for the initial
+    // spawn and for every teleport.
+    auto settleAt = [&](double x, double z) -> WorldCoord {
+        WorldCoord   probe(x, 80.0, z);
+        ChunkCoord   c0 = chunkmath::worldToChunk(probe, voxelSize, chunkSize);
+        for (const ChunkCoord& c : lod.desiredChunks(c0, "terrain")) loadChunk(wrapCC(c));
         int surfY = 40;
         for (int y = 95; y >= 0; --y) {
-            if (!world.getVoxel(WorldCoord(0.5, y + 0.5, 0.5)).isEmpty()) { surfY = y; break; }
+            if (!world.getVoxel(WorldCoord(x, y + 0.5, z)).isEmpty()) { surfY = y; break; }
         }
-        camPos = WorldCoord(0.5, std::max(surfY + 6, 24) + 0.0, 0.5);
-    }
+        return WorldCoord(x, std::max(surfY + 6, 24) + 0.0, z);
+    };
+
+    // ── Camera: start above the surface at the origin ───────────────────────────
+    float pitch = -0.35f, yaw = 0.0f;
+    WorldCoord camPos = settleAt(0.5, 0.5);
 
     GLFWwindow* glfwWin = window.glfwHandle();
     glfwSetInputMode(glfwWin, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     bool cursorCaptured = true, firstMouse = true, prevF = false;
     double lastMouseX = 0.0, lastMouseY = 0.0;
+    constexpr int kTeleKeys[] = {GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3,
+                                 GLFW_KEY_4, GLFW_KEY_5, GLFW_KEY_6};
+    bool prevTele[std::size(kTeleKeys)] = {};
 
     Log::info(kLogCat, "Fly the world. WASD move, mouse look, Space/Shift up/down, "
                        "hold Left-Ctrl to fly fast, F cursor, ESC quit.");
@@ -338,6 +425,21 @@ layers:
             firstMouse = true;
         }
         prevF = curF;
+
+        // Teleport: number keys 1..6 jump along +X to escalating distances (up to
+        // the Minecraft border and the engine's real edge), each clamped to the
+        // world bounds so a preset never lands past a border or the int32 limit.
+        for (std::size_t i = 0; i < std::size(kTeleKeys); ++i) {
+            const bool cur = glfwGetKey(glfwWin, kTeleKeys[i]) == GLFW_PRESS;
+            if (cur && !prevTele[i]) {
+                double tx = kTeleportPresetsM[i];
+                if (bounded)              tx = std::clamp(tx, -halfSizeM, halfSizeM);
+                else if (torus.enabled()) tx = torus.wrapCoordM(tx);
+                tx = std::clamp(tx, -kEngineLimitM, kEngineLimitM);
+                camPos = settleAt(tx + 0.5, 0.5);
+            }
+            prevTele[i] = cur;
+        }
 
         // Mouse look.
         if (cursorCaptured) {
@@ -368,22 +470,45 @@ layers:
         if (glfwGetKey(glfwWin, GLFW_KEY_SPACE)      == GLFW_PRESS) delta.y += step;
         if (glfwGetKey(glfwWin, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) delta.y -= step;
         glm::dvec3 p = camPos.value + delta;
-        // Invisible world border: clamp horizontally so you cannot fly past the edge.
         if (bounded) {
+            // --size: invisible hard border you cannot fly past.
             p.x = std::clamp(p.x, -halfSizeM, halfSizeM);
             p.z = std::clamp(p.z, -halfSizeM, halfSizeM);
+        } else if (torus.enabled()) {
+            // --wrap: cross an edge and reappear at the opposite one (a torus).
+            p.x = torus.wrapCoordM(p.x);
+            p.z = torus.wrapCoordM(p.z);
         }
+        // Engine edge: even an "infinite" world is capped short of the int32 chunk
+        // overflow (see kEngineLimitM), so free-flight can never wrap chunk indices.
+        p.x = std::clamp(p.x, -kEngineLimitM, kEngineLimitM);
+        p.z = std::clamp(p.z, -kEngineLimitM, kEngineLimitM);
         camPos = WorldCoord(p);
 
         // ── Stream chunks around the camera ─────────────────────────────────────
         ChunkCoord center = chunkmath::worldToChunk(camPos, voxelSize, chunkSize);
         int loaded = 0;
-        for (const ChunkCoord& c : lod.desiredChunks(center, "terrain"))
-            if (loadChunk(c) && ++loaded >= kLoadsPerFrame) break;
         std::vector<ChunkCoord> toEvict;
-        for (const auto& kv : meshes)
-            if (lod.shouldEvict(center, kv.first, "terrain") || !inBounds(kv.first))
-                toEvict.push_back(kv.first);
+        if (torus.enabled()) {
+            // The camera stays in the canonical domain, but its streaming ring can
+            // spill over a seam; fold each desired chunk onto the torus. Because
+            // LOD's raw distance metric is meaningless on folded keys, drive eviction
+            // off the desired set directly (load nearest-first, drop the rest).
+            const auto ring = lod.desiredChunks(center, "terrain");
+            std::unordered_set<ChunkCoord, ChunkCoordHash> desired;
+            desired.reserve(ring.size());
+            for (const ChunkCoord& c : ring) desired.insert(wrapCC(c));
+            for (const ChunkCoord& c : ring)
+                if (loadChunk(wrapCC(c)) && ++loaded >= kLoadsPerFrame) break;
+            for (const auto& kv : meshes)
+                if (!desired.count(kv.first)) toEvict.push_back(kv.first);
+        } else {
+            for (const ChunkCoord& c : lod.desiredChunks(center, "terrain"))
+                if (loadChunk(c) && ++loaded >= kLoadsPerFrame) break;
+            for (const auto& kv : meshes)
+                if (lod.shouldEvict(center, kv.first, "terrain") || !inBounds(kv.first))
+                    toEvict.push_back(kv.first);
+        }
         for (const ChunkCoord& c : toEvict) {
             meshes[c].destroy(); meshes.erase(c);
             terrainLayer->unloadChunk(c);
@@ -401,17 +526,25 @@ layers:
         std::snprintf(line, sizeof(line),
                       "seed %llu | %s | biome %s | xyz %.0f %.0f %.0f | %s",
                       static_cast<unsigned long long>(worldSeed),
-                      bounded ? "bounded" : "infinite",
+                      bounded ? "bounded" : (wrapping ? "wrapping" : "infinite"),
                       voxelworld_biome_name(camPos.value.x, camPos.value.z),
                       camPos.value.x, camPos.value.y, camPos.value.z,
                       fast ? "FAST" : "cruise");
         renderer.setHudText({std::string(line),
-                             "WASD move  mouse look  Space/Shift up/down  "
-                             "Left-Ctrl fast  F cursor  ESC quit"});
+                             "WASD move  mouse look  Space/Shift up/down  Left-Ctrl fast  "
+                             "1-6 teleport (5=MC border)  F cursor  ESC quit"});
 
         for (const auto& kv : meshes) {
             const Chunk* chunk = terrainLayer->getChunk(kv.first);
-            if (chunk) renderer.renderChunk(kv.second, chunk->origin(), voxelSize);
+            if (!chunk) continue;
+            WorldCoord origin = chunk->origin();
+            // On a torus a chunk's canonical origin may be a whole world away; draw
+            // it at the periodic image nearest the camera so it tiles seamlessly.
+            if (torus.enabled())
+                origin = WorldCoord(torus.nearestOriginM(origin.value.x, camPos.value.x),
+                                    origin.value.y,
+                                    torus.nearestOriginM(origin.value.z, camPos.value.z));
+            renderer.renderChunk(kv.second, origin, voxelSize);
         }
         renderer.render();
     }

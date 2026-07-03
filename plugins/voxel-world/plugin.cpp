@@ -115,7 +115,7 @@ double value3(double x, double y, double z, uint64_t seed, double frequency) {
 // Fractal value noise over the (x,z) plane in [0,1), with a caller-set base
 // frequency and octave count. Climate fields use a low base frequency (large
 // features); the surface-roughness field uses a higher one.
-double fbm2(double x, double z, uint64_t seed, double baseFreq, int octaves) {
+double fbm2_base(double x, double z, uint64_t seed, double baseFreq, int octaves) {
     double sum = 0.0, norm = 0.0, amp = 0.5, freq = baseFreq;
     for (int o = 0; o < octaves; ++o) {
         sum  += amp * value3(x, 0.0, z, seed + static_cast<uint64_t>(o) * 1013u, freq);
@@ -124,6 +124,44 @@ double fbm2(double x, double z, uint64_t seed, double baseFreq, int octaves) {
         freq *= 2.0;
     }
     return sum / norm;  // [0,1)
+}
+
+// ── Toroidal wrap seam blend (demo, see demos/21-voxel-world) ─────────────────
+// When the host sets a wrap period (voxelworld_set_wrap), the world is a torus of
+// g_wrapPeriodM metres in x and z. Rather than periodicise the noise itself, every
+// surface/climate field — which all route through fbm2 — is blended across a band
+// of width g_wrapBandM at the high (+H) edge toward the wrapped-around terrain, so
+// the seam matches in value AND slope (a smoothstep weight has zero derivative at
+// both band ends). The interior is byte-for-byte the native field; non-wrapping
+// worlds (period 0) skip all of this. Caves (3D value noise) are not blended — an
+// underground carve rarely meets the surface seam.
+double g_wrapPeriodM = 0.0;   // torus period in metres per axis (0 = not wrapping)
+double g_wrapBandM   = 0.0;   // seam blend band width in metres
+
+// Smoothstep 0->1 across the blend band [H-band, H]; 0 below it. Quintic (the same
+// zero-2nd-derivative curve as the noise interpolant) so the blend leaves no crease.
+double seamWeight(double c, double H, double band) {
+    const double t = (c - (H - band)) / band;
+    if (t <= 0.0) return 0.0;
+    if (t >= 1.0) return 1.0;
+    return smoother(t);
+}
+
+double fbm2(double x, double z, uint64_t seed, double baseFreq, int octaves) {
+    if (g_wrapPeriodM <= 0.0 || g_wrapBandM <= 0.0)
+        return fbm2_base(x, z, seed, baseFreq, octaves);
+    const double P = g_wrapPeriodM, H = 0.5 * P, W = g_wrapBandM;
+    const double wx = seamWeight(x, H, W);
+    const double wz = seamWeight(z, H, W);
+    if (wx == 0.0 && wz == 0.0)
+        return fbm2_base(x, z, seed, baseFreq, octaves);  // pristine interior
+    // Bilinear blend toward the far edge (x-P / z-P) and, in the corner, the far
+    // corner (x-P, z-P). At x=+H,wx=1 the value is exactly the native -H edge.
+    const double f00 = fbm2_base(x,     z,     seed, baseFreq, octaves);
+    const double f10 = fbm2_base(x - P, z,     seed, baseFreq, octaves);
+    const double f01 = fbm2_base(x,     z - P, seed, baseFreq, octaves);
+    const double f11 = fbm2_base(x - P, z - P, seed, baseFreq, octaves);
+    return lerp(lerp(f00, f10, wx), lerp(f01, f11, wx), wz);
 }
 
 // ── Climate fields (pure fns of world x,z + seed; continuous & low-frequency) ──
@@ -480,6 +518,14 @@ VOXEL_PLUGIN_EXPORT int voxelworld_plugin_init(PluginContext* ctx) {
 // the registered noise use the run's seed.
 VOXEL_PLUGIN_EXPORT void voxelworld_set_seed_ptr(uint64_t* ptr) {
     g_seedPtr = ptr;
+}
+
+// Enable/disable the toroidal wrap seam blend. period_m is the world period per
+// horizontal axis (0 disables — the world generates as normal); band_m is the
+// width of the transitional swath at the +period/2 edge. Set before generation.
+VOXEL_PLUGIN_EXPORT void voxelworld_set_wrap(double period_m, double band_m) {
+    g_wrapPeriodM = period_m;
+    g_wrapBandM   = band_m;
 }
 
 // Biome name under a world column — the demo HUD reads this for the current biome.
