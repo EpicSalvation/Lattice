@@ -379,7 +379,7 @@ voxel-game-engine
 │   ├── configuration-guide.md             # Every tunable knob: YAML, Tuning.h, runtime APIs
 │   ├── creating-voxels.md                 # Material definitions, recipes, asset import
 │   ├── save-format-versioning.md          # .vxc format, version contract, migration path
-│   ├── tutorials/                         # Step-by-step walkthroughs (01-hello-voxel … 14-performance-tuning)
+│   ├── tutorials/                         # Step-by-step walkthroughs (01-14 core, 15-17 advanced)
 │   └── proposals/                         # Design proposals (recipe-occupancy, etc.)
 ├── CMakeLists.txt
 ├── CONTRIBUTING.md
@@ -769,8 +769,12 @@ on what you want to do:
   is a progressive, step-by-step walkthrough. Start with
   [01 — Hello Voxel](docs/tutorials/01-hello-voxel.md) and
   [02 — Your First Plugin](docs/tutorials/02-your-first-plugin.md), then follow the
-  numbered sequence through materials, recipes, asset import, multi-layer worlds,
-  player mechanics, audio, multiplayer, simulation, and performance tuning.
+  numbered sequence (01–14) through materials, recipes, asset import, multi-layer
+  worlds, player mechanics, audio, multiplayer, simulation, and performance
+  tuning. An **advanced tier (15–17)** then covers building worlds at scale:
+  [15 — Large Worlds and Coordinate Space](docs/tutorials/15-large-worlds-and-coordinate-space.md),
+  [16 — Wrapping (Toroidal) Worlds](docs/tutorials/16-wrapping-worlds.md), and
+  [17 — Seamless Procedural Generation](docs/tutorials/17-seamless-procedural-generation.md).
 - **Start a new game from boilerplate** — the [templates](templates/) are
   well-commented, copy-paste starting points: a game entrypoint, an annotated
   layer config, and world-generation / gameplay plugin skeletons. See
