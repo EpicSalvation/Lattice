@@ -16,6 +16,8 @@
 #include "plugin_api.h"
 #include "world/Voxel.h"
 
+#include "voxel_world_profile.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -138,6 +140,15 @@ double fbm2_base(double x, double z, uint64_t seed, double baseFreq, int octaves
 double g_wrapPeriodM = 0.0;   // torus period in metres per axis (0 = not wrapping)
 double g_wrapBandM   = 0.0;   // seam blend band width in metres
 
+// ── Active world profile (M19, "No Man's Voxel") ──────────────────────────────
+// The multi-world demo (demos/22) sets these via voxelworld_set_profile before
+// streaming each world's chunk batch; single-threaded synchronous generation makes
+// that safe. Default = demo 21's world (six biomes, no inlined water), and
+// voxelworld_set_seed_ptr resets them here, so the un-profiled path is unchanged.
+int      g_biomeMode = VW_PARADISE;  // a VwBiomeMode; selects the biome set
+bool     g_hasWater  = false;        // true ⇒ inline a flat sea (demo 22's paradise)
+uint64_t g_profileSeed = 0;          // backing store for the active profile's seed
+
 // Smoothstep 0->1 across the blend band [H-band, H]; 0 below it. Quintic (the same
 // zero-2nd-derivative curve as the noise interpolant) so the blend leaves no crease.
 double seamWeight(double c, double H, double band) {
@@ -193,6 +204,20 @@ double mountainLift(double mtn, double land) {
 // Shared by the terrain fill, the cave carve, and the decoration pass so they all
 // agree on the surface.
 int surfaceHeight(double wx, double wz, uint64_t seed) {
+    if (g_biomeMode == VW_MOON) {
+        // A dead moon: gently rolling grey regolith pocked with impact craters.
+        // No ocean/mountain-lift shaping — just a low-amplitude base plus bowl
+        // depressions where a mid-frequency field peaks. All from the shared
+        // value-noise helpers (no new materials/textures), so it stays seamless
+        // and deterministic like every other field.
+        const double base = fbm2(wx, wz, voxel_seed_mix(seed, 0x3070u), 1.0 / 220.0, 3);
+        double h = kSeaLevel + (base - 0.5) * 22.0;               // ~ ±11 around sea level
+        const double c = fbm2(wx, wz, voxel_seed_mix(seed, 0xC7A7E1u), 1.0 / 64.0, 2);
+        h -= smoothstep(0.60, 0.90, c) * 14.0;                    // carve crater bowls
+        const double rough = fbm2(wx, wz, voxel_seed_mix(seed, 0x2076u), 1.0 / 40.0, 4) - 0.5;
+        h += rough * 2.5;                                         // fine rubble
+        return static_cast<int>(std::llround(h));
+    }
     const double cont = continentalness(wx, wz, seed);
     const double mtn  = mountainness(wx, wz, seed);
     const double land = landFactor(cont);
@@ -209,19 +234,30 @@ int surfaceHeight(double wx, double wz, uint64_t seed) {
 // fields as the height so the two stay consistent (ocean columns sit below sea
 // level, mountain columns are the high ones).
 Biome biomeAt(double wx, double wz, uint64_t seed) {
+    // The moon has no biome concept (handled wholesale in the generator); report a
+    // neutral bare biome so any stray decoration query gates itself out.
+    if (g_biomeMode == VW_MOON) return Biome::Mountains;
+
     const double cont = continentalness(wx, wz, seed);
     const double land = landFactor(cont);
-    if (land < 0.5) return Biome::Ocean;
+    const double mtn  = mountainness(wx, wz, seed);
 
-    const double mtn = mountainness(wx, wz, seed);
+    if (g_biomeMode == VW_PARADISE) {
+        if (land < 0.5) return Biome::Ocean;
+        if (mountainLift(mtn, land) > 16.0) return Biome::Mountains;
+        const double temp = temperature(wx, wz, seed);
+        const double hum  = humidity(wx, wz, seed);
+        if (temp < 0.36)               return Biome::SnowyTundra;
+        if (temp > 0.64 && hum < 0.42) return Biome::Desert;
+        if (hum  > 0.54)               return Biome::Forest;
+        return Biome::Plains;
+    }
+
+    // Simpler worlds (demo 22): one dominant biome plus mountain ranges where the
+    // mountain field peaks — no ocean (these worlds carry no water), so a low
+    // continentalness basin is just dry dominant-biome ground.
     if (mountainLift(mtn, land) > 16.0) return Biome::Mountains;
-
-    const double temp = temperature(wx, wz, seed);
-    const double hum  = humidity(wx, wz, seed);
-    if (temp < 0.36)               return Biome::SnowyTundra;
-    if (temp > 0.64 && hum < 0.42) return Biome::Desert;
-    if (hum  > 0.54)               return Biome::Forest;
-    return Biome::Plains;
+    return (g_biomeMode == VW_SNOWY) ? Biome::SnowyTundra : Biome::Desert;
 }
 
 const char* biomeName(Biome b) {
@@ -249,6 +285,9 @@ void terrain_generator(WorldCoord chunk_origin, int grid_size, Voxel* out, void*
     const MaterialProperties sand    = material(kSandIdx,    1600.0f, 0.55f, 0.20f, 0.30f);
     const MaterialProperties snow    = material(kSnowIdx,     900.0f, 0.40f, 0.15f);
     const MaterialProperties bedrock = material(kBedrockIdx, 4000.0f, 1.00f, 1.00f);
+    // Matches the registered "water" material (porosity 1); used only when a
+    // profile sets has_water (demo 22's paradise inlines its own sea).
+    const MaterialProperties water   = material(kWaterIdx,   1000.0f, 0.00f, 0.00f, 1.0f);
 
     const int64_t baseX = static_cast<int64_t>(std::llround(chunk_origin.value.x));
     const int64_t baseY = static_cast<int64_t>(std::llround(chunk_origin.value.y));
@@ -261,24 +300,29 @@ void terrain_generator(WorldCoord chunk_origin, int grid_size, Voxel* out, void*
             const int    h  = surfaceHeight(wx, wz, seed);
             const Biome  b  = biomeAt(wx, wz, seed);
 
-            // Choose the surface cap + subsoil per biome.
-            const bool shore = h <= kSeaLevel + 1;   // beaches / lake edges
+            // Choose the surface cap + subsoil. The moon is bare grey regolith
+            // (stone all the way up), so it skips the biome cap logic entirely.
             MaterialProperties cap = grass, sub = dirt;
-            switch (b) {
-                case Biome::Ocean:  cap = sand;  sub = sand; break;
-                case Biome::Desert: cap = sand;  sub = sand; break;
-                case Biome::SnowyTundra: cap = snow; sub = dirt; break;
-                case Biome::Mountains:
-                    cap = (h >= kSnowLine) ? snow : stone;
-                    sub = stone; break;
-                case Biome::Plains:
-                case Biome::Forest:
-                    cap = grass; sub = dirt; break;
-            }
-            // A wet shoreline is sandy regardless of the inland biome (except the
-            // already-sandy desert/ocean and the snow-capped tundra).
-            if (shore && b != Biome::Ocean && b != Biome::Desert && b != Biome::SnowyTundra) {
-                cap = sand; sub = sand;
+            if (g_biomeMode == VW_MOON) {
+                cap = stone; sub = stone;
+            } else {
+                const bool shore = h <= kSeaLevel + 1;   // beaches / lake edges
+                switch (b) {
+                    case Biome::Ocean:  cap = sand;  sub = sand; break;
+                    case Biome::Desert: cap = sand;  sub = sand; break;
+                    case Biome::SnowyTundra: cap = snow; sub = dirt; break;
+                    case Biome::Mountains:
+                        cap = (h >= kSnowLine) ? snow : stone;
+                        sub = stone; break;
+                    case Biome::Plains:
+                    case Biome::Forest:
+                        cap = grass; sub = dirt; break;
+                }
+                // A wet shoreline is sandy regardless of the inland biome (except the
+                // already-sandy desert/ocean and the snow-capped tundra).
+                if (shore && b != Biome::Ocean && b != Biome::Desert && b != Biome::SnowyTundra) {
+                    cap = sand; sub = sand;
+                }
             }
 
             for (int y = 0; y < grid_size; ++y) {
@@ -289,6 +333,19 @@ void terrain_generator(WorldCoord chunk_origin, int grid_size, Voxel* out, void*
                 else if (wy == h)               v = Voxel{cap};
                 else if (wy >= h - kDirtDepth)  v = Voxel{sub};
                 else                            v = Voxel{stone};
+            }
+
+            // Inlined flat sea (M19): when a profile requests water, flood empty
+            // cells from just above the surface up to sea level. The multi-world
+            // demo uses this instead of loading the separate water plugin; demo 21
+            // (g_hasWater == false) is unaffected and still floods via that plugin.
+            if (g_hasWater && h < kSeaLevel) {
+                for (int y = 0; y < grid_size; ++y) {
+                    const int64_t wy = baseY + y;
+                    if (wy <= h || wy > kSeaLevel) continue;
+                    Voxel& v = out[x + grid_size * (y + grid_size * z)];
+                    if (v.isEmpty()) v = Voxel{water};
+                }
             }
         }
 }
@@ -330,6 +387,7 @@ void cave_feature(WorldCoord origin, double vs, int n, Voxel* inout,
 // ── Feature generator: ore veins ─────────────────────────────────────────────
 void ore_feature(WorldCoord origin, double vs, int n, Voxel* inout,
                  const RecipeParam* params, size_t count, uint64_t seed, void*) {
+    if (g_biomeMode == VW_MOON) return;   // dead moon: no ore veins
     const double richness = std::clamp(recipe_param_num(params, count, "ore_richness", 0.14), 0.0, 1.0);
     const double scale    = recipe_param_num(params, count, "scale", 6.0);
     const double freq = (scale > 0.0) ? (1.0 / scale) : (1.0 / 6.0);
@@ -356,6 +414,7 @@ void ore_feature(WorldCoord origin, double vs, int n, Voxel* inout,
 void decoration_feature(WorldCoord origin, double /*voxel_size_m*/, int n, Voxel* inout,
                         const RecipeParam* params, size_t count, uint64_t seed, void*) {
     (void)params; (void)count;
+    if (g_biomeMode == VW_MOON) return;   // dead moon: no trees or cacti
     const uint64_t decoSeed = voxel_seed_mix(seed, 0xDEC0u);
     const MaterialProperties log    = material(kLogIdx,    600.0f, 0.60f, 0.35f);
     const MaterialProperties leaf   = material(kLeavesIdx, 200.0f, 0.05f, 0.10f, 0.40f);
@@ -518,6 +577,32 @@ VOXEL_PLUGIN_EXPORT int voxelworld_plugin_init(PluginContext* ctx) {
 // the registered noise use the run's seed.
 VOXEL_PLUGIN_EXPORT void voxelworld_set_seed_ptr(uint64_t* ptr) {
     g_seedPtr = ptr;
+    // Reset generation to the demo-21 defaults (pristine six-biome world, no
+    // inlined water, no wrap) so this non-profile entry point is independent of any
+    // prior voxelworld_set_profile call. Demo 21 calls set_wrap AFTER this, so the
+    // wrap reset here does not clobber a wrapping world; the multi-world demo uses
+    // voxelworld_set_profile instead of this entry point. Keeps tests order-free.
+    g_biomeMode   = VW_PARADISE;
+    g_hasWater    = false;
+    g_wrapPeriodM = 0.0;
+    g_wrapBandM   = 0.0;
+}
+
+// Activate a world profile (M19). The demo sets this before streaming each world's
+// chunk batch; the plugin reads g_biomeMode/g_hasWater/wrap in its generator and
+// feature passes. The seed is stored internally and pointed at by g_seedPtr so the
+// HUD biome query uses the active world's seed (the demo also passes the same seed
+// value to the generator via user_data). Declared in voxel_world_profile.h as plain
+// extern "C" (it is only ever called compiled-in, never across a DLL boundary), so
+// the definition must match that linkage — no dllexport here.
+extern "C" void voxelworld_set_profile(const VwProfile* p) {
+    if (!p) return;
+    g_profileSeed = p->seed;
+    g_seedPtr     = &g_profileSeed;
+    g_biomeMode   = p->biome_mode;
+    g_hasWater    = p->has_water != 0;
+    g_wrapPeriodM = p->period_m;
+    g_wrapBandM   = p->band_m;
 }
 
 // Enable/disable the toroidal wrap seam blend. period_m is the world period per

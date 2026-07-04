@@ -535,11 +535,23 @@ foreach(_demo ${_voxel_demo_dirs})
     # wrapper; VOXEL_PLUGIN_NO_ABI_STAMP drops its (here-unused) ABI stamp. The water
     # plugin still loads from disk via VOXEL_WATER_PLUGIN_PATH. (voxel-world is ALSO
     # built as a disk MODULE for consistency with the other worldgen plugins.)
-    if(_demo STREQUAL "21-voxel-world")
+    # The Voxel World (demos/21) and No Man's Voxel (demos/22) demos COMPILE IN the
+    # voxel-world worldgen plugin so they can call its custom entry points directly:
+    # voxelworld_biome_name() for the HUD, voxelworld_set_seed_ptr() (demo 21), and
+    # voxelworld_set_profile() (demo 22's per-world profile). The include dir lets the
+    # demo see the plugin's shared headers (voxel_world_profile.h).
+    if(_demo STREQUAL "21-voxel-world" OR _demo STREQUAL "22-no-mans-voxel")
       target_sources(${_demo} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/voxel-world/plugin.cpp)
       target_compile_definitions(${_demo} PRIVATE
         VOXELWORLD_COMPILED_IN VOXEL_PLUGIN_NO_ABI_STAMP)
+      target_include_directories(${_demo} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/plugins/voxel-world)
+    endif()
+    # No Man's Voxel additionally uses the procedural-sky header (psky::blend / presets).
+    if(_demo STREQUAL "22-no-mans-voxel")
+      target_include_directories(${_demo} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/plugins/procedural-sky)
     endif()
     # Inject the assets directory path for demos that bundle asset files.
     set(_demo_assets ${_demo_dir}/assets)
@@ -667,7 +679,8 @@ if(TEST_SOURCES)
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/example-hooks
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/atmospheric-mist
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/range-attenuation
-    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/procedural-sky)
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/procedural-sky
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/voxel-world)
   voxel_set_warnings(voxel-engine-tests)
   if(VOXEL_TEST_PLUGINS)
     add_dependencies(voxel-engine-tests ${VOXEL_TEST_PLUGINS})

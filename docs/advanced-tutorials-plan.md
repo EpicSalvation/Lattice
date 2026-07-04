@@ -214,10 +214,19 @@ fields, lattice value noise), `src/world/Noise.h`, `include/plugin_api.h`
 
 ## Deferred — potential future tutorials
 
-These are flagged now but intentionally **not planned in detail until the M19
-"No Man's Voxel" demo lands**, since that demo — where the player flies up and
-out of a world's local bounds into open space between worlds — will inform
-whether they are needed and what they should say.
+**Update — M19 has landed** (`demos/22-no-mans-voxel`; see `docs/milestones.md`
+M19). The pattern it established for the space *between* worlds: the camera flies
+in one continuous double-precision **scene space**, and each world is a genuinely
+distinct engine `World` with its own **scene offset** (XZ placement, with void gaps
+between footprints), its own `worldwrap::Torus`, seed, and biome/sky/fog profile.
+Footprints never overlap, so at most one world streams at a time and the gaps are
+"space"; a world is left by flying UP (the torus wrap disengages above the
+atmosphere top and the sky/fog fade to the space backdrop). These two tutorials can
+now be written responsibly against that as-built model — revisit and schedule them.
+
+These were flagged before that demo landed and are still **not planned in detail**;
+the M19 demo — where the player flies up and out of a world's local bounds into open
+space between worlds — now informs whether they are needed and what they should say.
 
 - **18 — Streaming at world scale.** Streaming budgets / LOD tuning for very
   large worlds. Overlaps tutorial 14 (Performance Tuning); may end up a

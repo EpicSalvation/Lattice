@@ -62,6 +62,21 @@ inline SkyParams spaceSky() {
     return s;
 }
 
+/// @brief Linear blend between two sky looks (colors + horizon falloff); `enabled` follows `a`.
+///
+/// Both looks are assumed enabled. The M19 "No Man's Voxel" demo uses this to fade
+/// a world's day sky toward the space backdrop (spaceSky) as the player climbs out
+/// of the atmosphere; the plugin's day/night cycle uses it internally too.
+inline SkyParams blend(const SkyParams& a, const SkyParams& b, float t) {
+    SkyParams s;
+    s.enabled         = a.enabled;
+    s.zenith          = glm::mix(a.zenith,  b.zenith,  t);
+    s.horizon         = glm::mix(a.horizon, b.horizon, t);
+    s.ground          = glm::mix(a.ground,  b.ground,  t);
+    s.horizon_falloff = a.horizon_falloff + (b.horizon_falloff - a.horizon_falloff) * t;
+    return s;
+}
+
 /// @brief Base look plus the optional day/night animation. Defaults to a static day sky.
 struct Config {
     SkyParams day   = daySky();     ///< the look at cycle phase 0 (and when static)
